@@ -1,6 +1,6 @@
-# SEC DCF Audit Engine — Moduł 1 & Moduł 2
+# SEC DCF Audit Engine — Moduł 1, Moduł 2 i Moduł 3
 
-Deterministyczny silnik pobierania, normalizacji XBRL, audytu księgowego (`10-K` / `10-K/A`), analizy wskaźnikowej, wyznaczania WACC oraz 5-letniej wyceny FCFF/DCF dla spółek niefinansowych.
+Deterministyczny silnik pobierania, normalizacji XBRL, audytu księgowego (`10-K` / `10-K/A`), analizy wskaźnikowej, wyznaczania WACC, 5-letniej wyceny FCFF/DCF oraz audytowalnej analizy jakościowej raportów `10-K` (`Item 1A` i `Item 7`) dla spółek niefinansowych.
 
 ---
 
@@ -42,7 +42,25 @@ Moduł 2 (`sec_dcf.analysis`, `sec_dcf.models.analysis`) operuje wyłącznie na 
 
 ---
 
-## 3. Przykład użycia w Pythonie
+## 3. Architektura Modułu 3: Audytowalna Analiza Jakościowa 10-K (`google-genai`)
+
+Moduł 3 (`sec_dcf.qualitative`, `sec_dcf.models.qualitative`) łączy ekstrakcję sekcji opisowych `10-K` z warstwą AI opartą wyłącznie o aktualne SDK **`google-genai`** (`from google import genai`) oraz deterministycznym audytem w Pythonie:
+
+- **`extractor.py` (`TenKTextExtractor`, `build_sections_from_texts`)**:
+  - Pobieranie najnowszego raportu `10-K` przez `edgartools` ze współdzielonym ogranicznikiem zapytań (`<= 8 req/s`) oraz blokadą instytucji finansowych (**SIC 6000–6999**).
+  - Ekstrakcja **Item 1A (Risk Factors)** oraz **Item 7 (MD&A)** (z bezpiecznym fallbackiem indeksowania `tenk["Item 1A"]` / `tenk["Item 7"]`) oraz konfigurowalnym przycinaniem promptu (`max_chars_per_section = 60_000`), przy jednoczesnym zachowaniu pełnego `raw_text` do weryfikacji cytatów.
+  - Funkcja `build_sections_from_texts` umożliwia analizę w 100% offline na lokalnych tekstach.
+- **`gemini_client.py` (`GeminiQualitativeAnalyzer`)**:
+  - Tryb **BYOK** (klucz czytany z `GEMINI_API_KEY` w `.env`, maskowany w komunikatach wyjątków `GeminiApiError`, nigdy nie zapisywany w kodzie).
+  - Konfigurowalny model (domyślnie `gemini-3.8-flash`, z możliwością przełączenia np. na `gemini-4-hydrogen`), jawny timeout HTTP (`types.HttpOptions(timeout=...)` w milisekundach) oraz `response_schema=QualitativeExtractionPayload` (Pydantic Structured Outputs) przy `temperature=0.0`.
+  - Twarde instrukcje systemowe zakazujące obliczeń finansowych, cen docelowych i rekomendacji „Kup/Sprzedaj” oraz wymuszające `verbatim_quote` + `section` dla każdego punktu.
+- **`verifier.py` (`audit_qualitative_payload`, `verify_quote_in_section`, `normalize_for_quote_match`)**:
+  - Deterministyczna weryfikacja każdego `verbatim_quote` wobec oryginalnego tekstu wskazanej sekcji (usuwanie znaków zerowej szerokości `\u200b`/`\ufeff`/`\u00ad`, zamiana `\xa0`/`\u202f` na spację, ujednolicenie typografii i kolaps białych znaków) wraz z wykrywaniem pomyłek między sekcjami (`Item 1A` vs `Item 7`).
+  - Wyliczanie `verified_quote_ratio` (`Decimal`), ostrzeżenie `NO_CLAIMS_EXTRACTED` przy 0 punktach oraz skaner zgodności (`scan_prohibited_advice`) sprawdzający pola generowane przez AI (z pominięciem `verbatim_quote`). Tryb `strict=True` rzuca `QualitativeAuditError` przy niezweryfikowanych cytatach, 0 punktach lub flagach zgodności.
+
+---
+
+## 4. Przykład użycia w Pythonie
 
 ```python
 from decimal import Decimal
@@ -102,7 +120,7 @@ print("Range:", sensitivity.min_implied_value_per_share, "-", sensitivity.max_im
 
 ---
 
-## 4. Instalacja i uruchomienie testów (100% offline)
+## 5. Instalacja i uruchomienie testów (100% offline)
 
 Projekt wymaga **Pythona 3.11+**.
 
@@ -114,33 +132,34 @@ python -m venv .venv
 # 2. Instalacja paczki wraz z zależnościami deweloperskimi
 pip install -e ".[dev]"
 
-# 3. Uruchomienie pełnego zestawu testów (43 testy jednostkowe i integracyjne — 100% offline)
+# 3. Uruchomienie pełnego zestawu testów (60 testów jednostkowych i integracyjnych — 100% offline)
 pytest -v
 ```
 
-> Wszystkie **43 testy `pytest`** (Moduł 1 i Moduł 2) działają w **100% offline** — korzystają z lokalnych próbek w `tests/fixtures/` (`aapl_companyfacts.json`, `msft_companyfacts.json`) oraz mockowanych transportów, blokując jakiekolwiek wywołania sieciowe do SEC EDGAR i FRED API. Konfiguracja `pythonpath = ["src"]` w `pyproject.toml` umożliwia uruchamianie `.\.venv\Scripts\python.exe -m pytest -v` również bezpośrednio bez wcześniejszej instalacji edytowalnej.
+> Wszystkie **60 testów `pytest`** (Moduły 1, 2 i 3) działają w **100% offline** — korzystają z lokalnych próbek w `tests/fixtures/` (`aapl_companyfacts.json`, `msft_companyfacts.json`, `sample_10k_sections.json`) oraz mockowanych transportów, blokując jakiekolwiek wywołania sieciowe do SEC EDGAR, FRED API oraz Gemini API. Konfiguracja `pythonpath = ["src"]` w `pyproject.toml` umożliwia uruchamianie `.\.venv\Scripts\python.exe -m pytest -v` również bezpośrednio bez wcześniejszej instalacji edytowalnej.
 
 ---
 
-## 5. Konfiguracja `.env` i atrybucja danych FRED
+## 6. Konfiguracja `.env` i atrybucja danych FRED
 
-Przed wywołaniem zapytań sieciowych do SEC EDGAR lub FRED API utwórz plik `.env` na bazie szablonu `.env.example` i uzupełnij wymagane zmienne:
+Przed wywołaniem zapytań sieciowych do SEC EDGAR, FRED API lub Gemini API utwórz plik `.env` na bazie szablonu `.env.example` i uzupełnij wymagane zmienne:
 
 ```dotenv
 EDGAR_IDENTITY="TwojaNazwaAplikacji kontakt@twojadomena.com"
 FRED_API_KEY=twoj_klucz_fred_api
-GEMINI_API_KEY=
+GEMINI_API_KEY=twoj_klucz_gemini_api
 ```
 
-- `EDGAR_IDENTITY` jest wymagane przez SEC EDGAR przy wywołaniach `fetch_company_financials`.
+- `EDGAR_IDENTITY` jest wymagane przez SEC EDGAR przy wywołaniach `fetch_company_financials` oraz `TenKTextExtractor`.
 - `FRED_API_KEY` (darmowy klucz z serwisu FRED) jest wymagany przez `FredClient` przy pobieraniu bieżącej stopy `DGS10`. W trybie offline lub w testach można przekazać `risk_free_rate` ręcznie w `WaccInputs`.
+- `GEMINI_API_KEY` (tryb BYOK) jest wymagany przez `GeminiQualitativeAnalyzer` przy analizie online z użyciem modeli Gemini (`google-genai`). W testach offline można wstrzyknąć mockowanego klienta przez parametr `client=...`.
 - Plik `.env` jest ignorowany przez Git i nie powinien być nigdy commitowany do repozytorium.
 
 **Atrybucja danych FRED:** Produkt korzysta z FRED® API (Federal Reserve Bank of St. Louis) wyłącznie w celach badawczych i edukacyjnych, ale nie jest wspierany ani certyfikowany przez Federal Reserve Bank of St. Louis. Korzystanie z danych FRED podlega warunkom [FRED® API Terms of Use](https://fred.stlouisfed.org/docs/api/terms_of_use.html).
 
 ---
 
-## 6. Klauzula edukacyjna i brak doradztwa inwestycyjnego
+## 7. Klauzula edukacyjna i brak doradztwa inwestycyjnego
 
 **PL:** Projekt ma charakter wyłącznie edukacyjny, badawczy i inżynierski. Narzędzie oraz generowane przez nie dane i przedziały wartości nie stanowią rekomendacji inwestycyjnej, porady inwestycyjnej ani analizy inwestycyjnej w rozumieniu ustawy o obrocie instrumentami finansowymi (u.o.i.f.) oraz rozporządzenia MAR (UE nr 596/2014). Wszelkie założenia i decyzje analityczne należą wyłącznie do użytkownika.
 

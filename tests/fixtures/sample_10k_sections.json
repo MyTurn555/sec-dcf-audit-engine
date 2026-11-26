@@ -1,0 +1,11 @@
+{
+  "ticker": "ACME",
+  "company_name": "Acme Cloud Systems, Inc.",
+  "cik": "0001234567",
+  "filing_date": "2026-02-14",
+  "period_of_report": "2025-12-31",
+  "accession_number": "0001234567-26-000010",
+  "form": "10-K",
+  "item_1a": "Item 1A. Risk Factors\n\nSupply Chain and Foundry Concentration\nWe rely on a limited number of third-party semiconductor foundries located in Taiwan to fabricate our custom AI accelerators.\u00a0Any geopolitical disruption, export restriction, or natural disaster affecting these suppliers\u2019 facilities could delay product shipments and materially harm our revenue.\n\nCyber\u00adsecurity and Service Availability\nOur cloud platform processes sensitive enterprise workloads.\u200b A prolonged outage or unauthorized data\u202faccess incident could result in regulatory fines, customer attrition, and reputational damage.\n\nCustomer Concentration\nIn fiscal 2025, our two largest hyperscale customers accounted for 34% of total consolidated revenue, and neither customer has a long-term minimum purchase commitment.",
+  "item_7": "Item 7. Management\u2019s Discussion and Analysis of Financial Condition and Results of Operations\n\nOverview and Growth Drivers\nConsolidated revenue increased 24% year-over-year in fiscal 2025, driven primarily by \u201caccelerated enterprise adoption\u201d of our multi-region inference platform and higher net dollar retention among large enterprise cohorts.\n\nLiquidity and Working Capital Commentary\nDuring the fourth quarter of fiscal 2025, we extended payment terms for select strategic distributors from 45 days to 90 days, which contributed to an expansion in accounts receivable faster than revenue growth.\n\nOutlook\nManagement continues to invest in next-generation data center capacity while monitoring component lead times and power availability."
+}

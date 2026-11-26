@@ -20,7 +20,7 @@ from sec_dcf.models.financials import CompanyFinancialsReport
 from sec_dcf.validation.accounting import validate_financials
 
 
-class _RateLimiter:
+class RateLimiter:
     """Thread-safe minimum-interval limiter staying safely below SEC's 10 req/s cap."""
 
     def __init__(self, max_requests_per_second: float = 8.0) -> None:
@@ -40,6 +40,29 @@ class _RateLimiter:
             self._last_call_ts = time.monotonic()
 
 
+_RateLimiter = RateLimiter
+_SHARED_SEC_RATE_LIMITER = RateLimiter(max_requests_per_second=8.0)
+
+
+def get_shared_rate_limiter() -> RateLimiter:
+    """Return the process-wide SEC EDGAR rate limiter (<= 8 req/s)."""
+    return _SHARED_SEC_RATE_LIMITER
+
+
+def resolve_edgar_identity(identity: str | None = None, *, load_env: bool = True) -> str:
+    """Resolve and validate EDGAR_IDENTITY from argument or environment/.env."""
+    if load_env:
+        load_dotenv(override=False)
+
+    resolved_identity = (identity or os.getenv("EDGAR_IDENTITY") or "").strip()
+    if not resolved_identity or "@" not in resolved_identity:
+        raise EdgarIdentityError(
+            "EDGAR_IDENTITY must be set (e.g. 'AppName contact@domain.com') "
+            "before querying SEC EDGAR."
+        )
+    return resolved_identity
+
+
 def _is_financial_sic(sic: str | int | None) -> bool:
     """Check whether SIC code falls in Finance, Insurance, and Real Estate (6000-6999)."""
     if sic is None:
@@ -51,6 +74,19 @@ def _is_financial_sic(sic: str | int | None) -> bool:
     return 6000 <= sic_num <= 6999
 
 
+def ensure_non_financial_company(company: Any, ticker: str) -> None:
+    """Block financial institutions (SIC 6000-6999 or edgartools guard)."""
+    is_fin_fn = getattr(company, "is_financial_institution", None)
+    is_fin = bool(is_fin_fn()) if callable(is_fin_fn) else False
+    sic = getattr(company, "sic", None)
+    if is_fin or _is_financial_sic(sic):
+        name = getattr(company, "name", ticker)
+        raise UnsupportedCompanyTypeError(
+            f"{ticker} ({name}, SIC={sic}) is a financial institution; "
+            "this module supports non-financial operating companies only."
+        )
+
+
 class EdgarClient:
     """Deterministic SEC EDGAR ingestion client backed by edgartools."""
 
@@ -60,17 +96,12 @@ class EdgarClient:
         max_requests_per_second: float = 8.0,
         load_env: bool = True,
     ) -> None:
-        if load_env:
-            load_dotenv(override=False)
-
-        resolved_identity = (identity or os.getenv("EDGAR_IDENTITY") or "").strip()
-        if not resolved_identity or "@" not in resolved_identity:
-            raise EdgarIdentityError(
-                "EDGAR_IDENTITY must be set (e.g. 'AppName contact@domain.com') "
-                "before querying SEC EDGAR."
-            )
+        resolved_identity = resolve_edgar_identity(identity=identity, load_env=load_env)
         set_identity(resolved_identity)
-        self._rate_limiter = _RateLimiter(max_requests_per_second=max_requests_per_second)
+        if max_requests_per_second == 8.0:
+            self._rate_limiter = _SHARED_SEC_RATE_LIMITER
+        else:
+            self._rate_limiter = RateLimiter(max_requests_per_second=max_requests_per_second)
 
     def fetch_raw_company_and_facts(self, ticker: str) -> tuple[Company, Any]:
         """Fetch Company metadata and EntityFacts from SEC EDGAR, blocking financial firms."""
@@ -87,11 +118,7 @@ class EdgarClient:
         if getattr(company, "not_found", False):
             raise DataFetchError(f"Ticker {clean_ticker} was not found in SEC EDGAR.")
 
-        if company.is_financial_institution() or _is_financial_sic(company.sic):
-            raise UnsupportedCompanyTypeError(
-                f"{clean_ticker} ({company.name}, SIC={company.sic}) is a financial "
-                "institution; this module supports non-financial operating companies only."
-            )
+        ensure_non_financial_company(company, clean_ticker)
 
         self._rate_limiter.wait()
         try:

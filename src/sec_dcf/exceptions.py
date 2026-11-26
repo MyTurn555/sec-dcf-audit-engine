@@ -35,3 +35,11 @@ class WaccCalculationError(SecDcfError):
 
 class DcfValuationError(SecDcfError):
     """Raised when DCF assumptions or valuation invariants fail (e.g. WACC <= g)."""
+
+
+class GeminiApiError(SecDcfError):
+    """Raised when GEMINI_API_KEY configuration, Gemini API call, or response parsing fails."""
+
+
+class QualitativeAuditError(SecDcfError):
+    """Raised in strict qualitative audit mode when quote verification or compliance fails."""
