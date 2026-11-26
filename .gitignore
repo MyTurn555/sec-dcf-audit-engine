@@ -222,3 +222,14 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 .env
+
+# Project-specific settings
+.env.*
+!.env.example
+
+# IDE
+.idea/
+.vscode/
+
+# Python virtual environment
+.venv/
