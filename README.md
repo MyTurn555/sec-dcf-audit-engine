@@ -1,4 +1,4 @@
-# SEC DCF Audit Engine — Moduł 1, Moduł 2 i Moduł 3
+# SEC DCF Audit Engine — Moduły 1–4
 
 Deterministyczny silnik pobierania, normalizacji XBRL, audytu księgowego (`10-K` / `10-K/A`), analizy wskaźnikowej, wyznaczania WACC, 5-letniej wyceny FCFF/DCF oraz audytowalnej analizy jakościowej raportów `10-K` (`Item 1A` i `Item 7`) dla spółek niefinansowych.
 
@@ -60,7 +60,40 @@ Moduł 3 (`sec_dcf.qualitative`, `sec_dcf.models.qualitative`) łączy ekstrakcj
 
 ---
 
-## 4. Przykład użycia w Pythonie
+## 4. Architektura Modułu 4: Dashboard Streamlit + Plotly (`app/streamlit_app.py`)
+
+Moduł 4 udostępnia interaktywną warstwę wizualną w Streamlit + Plotly (`src/sec_dcf/ui/`, `app/streamlit_app.py`), bez duplikowania jakiejkolwiek matematyki finansowej:
+
+- **Tryb Offline Demo (domyślny):** uruchamia się natychmiast bez kluczy API i bez połączeń sieciowych, wykorzystując lokalne próbki `AAPL` i `MSFT` (`tests/fixtures/`) oraz próbkę audytu jakościowego (`sample_10k_sections.json`).
+- **Tryb Live (SEC EDGAR + FRED + BYOK Gemini):** pozwala wpisać dowolny ticker spółki niefinansowej, pobrać aktualne `DGS10` z FRED oraz uruchomić audyt 10-K na własnym kluczu `GEMINI_API_KEY` wpisywanym w polu `password` (przechowywanym wyłącznie w `st.session_state`, nigdy niezapisywanym na dysk ani w `st.cache_data`).
+- **Trzy zakładki + stały pasek boczny (u.o.i.f. / MAR):**
+  1. **Sprawozdania i wskaźniki (5Y):** status walidacji księgowej (`is_valid`, `validation_issues`, inspektor `audit_trail`), tabela 5Y i wykresy Plotly (Przychody/EBIT/FCF, ROIC i marże, Konwersja gotówki i CapEx/Revenue).
+  2. **WACC i wycena FCFF/DCF:** spójny przełącznik `include_leases` (ASC 842), `mid_year` vs `end_of_year`, edycja skalarna lub pełne ścieżki 5-letnie (`st.data_editor`), most `EV → Equity Value → Implied Value per Share`, mapa ciepła wrażliwości `WACC × g` oraz wykres przedziału wartości (*football field*).
+  3. **Audyt jakościowy 10-K (AI):** wybór modelu (`gemini-3.8-flash`, `gemini-3.5-flash-lite`, `gemini-4-hydrogen`) z opcjonalnym automatycznym fallbackiem na `gemini-3.5-flash-lite` przy błędzie `503 UNAVAILABLE`, wskaźnik `verified_quote_ratio`, ostrzeżenie o przycięciu sekcji i karty z odznakami `quote_verified`.
+
+```powershell
+# Instalacja zależności dashboardu i uruchomienie aplikacji
+pip install -e ".[app]"
+streamlit run app/streamlit_app.py
+```
+
+### Podgląd interfejsu (tryb Offline Demo)
+
+**1. Sprawozdania i wskaźniki (5Y) — walidacja bilansowa XBRL i panel wskaźników:**
+
+![Zakładka 1 — Sprawozdania i wskaźniki 5Y](docs/screenshots/tab1_financials.png)
+
+**2. WACC i wycena FCFF/DCF — most EV → Equity, prognozy 5Y, wrażliwość i *football field*:**
+
+![Zakładka 2 — WACC i wycena FCFF/DCF](docs/screenshots/tab2_dcf_valuation.png)
+
+**3. Audyt jakościowy 10-K (AI) — weryfikacja cytatów `Item 1A` / `Item 7` i odznaki `quote_verified`:**
+
+![Zakładka 3 — Audyt jakościowy 10-K](docs/screenshots/tab3_qualitative_audit.png)
+
+---
+
+## 5. Przykład użycia w Pythonie
 
 ```python
 from decimal import Decimal
@@ -120,7 +153,7 @@ print("Range:", sensitivity.min_implied_value_per_share, "-", sensitivity.max_im
 
 ---
 
-## 5. Instalacja i uruchomienie testów (100% offline)
+## 6. Instalacja i uruchomienie testów (100% offline)
 
 Projekt wymaga **Pythona 3.11+**.
 
@@ -129,18 +162,18 @@ Projekt wymaga **Pythona 3.11+**.
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 
-# 2. Instalacja paczki wraz z zależnościami deweloperskimi
-pip install -e ".[dev]"
+# 2. Instalacja paczki wraz z zależnościami deweloperskimi i dashboardu
+pip install -e ".[dev,app]"
 
-# 3. Uruchomienie pełnego zestawu testów (60 testów jednostkowych i integracyjnych — 100% offline)
+# 3. Uruchomienie pełnego zestawu testów (100% offline)
 pytest -v
 ```
 
-> Wszystkie **60 testów `pytest`** (Moduły 1, 2 i 3) działają w **100% offline** — korzystają z lokalnych próbek w `tests/fixtures/` (`aapl_companyfacts.json`, `msft_companyfacts.json`, `sample_10k_sections.json`) oraz mockowanych transportów, blokując jakiekolwiek wywołania sieciowe do SEC EDGAR, FRED API oraz Gemini API. Konfiguracja `pythonpath = ["src"]` w `pyproject.toml` umożliwia uruchamianie `.\.venv\Scripts\python.exe -m pytest -v` również bezpośrednio bez wcześniejszej instalacji edytowalnej.
+> Wszystkie testy `pytest` (Moduły 1–4, w tym testy logiki UI i `AppTest` dla dashboardu) działają w **100% offline** — korzystają z lokalnych próbek w `tests/fixtures/` (`aapl_companyfacts.json`, `msft_companyfacts.json`, `sample_10k_sections.json`) oraz mockowanych transportów, blokując jakiekolwiek wywołania sieciowe do SEC EDGAR, FRED API oraz Gemini API. Konfiguracja `pythonpath = ["src"]` w `pyproject.toml` umożliwia uruchamianie `.\.venv\Scripts\python.exe -m pytest -v` również bezpośrednio bez wcześniejszej instalacji edytowalnej.
 
 ---
 
-## 6. Konfiguracja `.env` i atrybucja danych FRED
+## 7. Konfiguracja `.env` i atrybucja danych FRED
 
 Przed wywołaniem zapytań sieciowych do SEC EDGAR, FRED API lub Gemini API utwórz plik `.env` na bazie szablonu `.env.example` i uzupełnij wymagane zmienne:
 
@@ -159,7 +192,7 @@ GEMINI_API_KEY=twoj_klucz_gemini_api
 
 ---
 
-## 7. Klauzula edukacyjna i brak doradztwa inwestycyjnego
+## 8. Klauzula edukacyjna i brak doradztwa inwestycyjnego
 
 **PL:** Projekt ma charakter wyłącznie edukacyjny, badawczy i inżynierski. Narzędzie oraz generowane przez nie dane i przedziały wartości nie stanowią rekomendacji inwestycyjnej, porady inwestycyjnej ani analizy inwestycyjnej w rozumieniu ustawy o obrocie instrumentami finansowymi (u.o.i.f.) oraz rozporządzenia MAR (UE nr 596/2014). Wszelkie założenia i decyzje analityczne należą wyłącznie do użytkownika.
 
