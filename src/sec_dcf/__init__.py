@@ -1,38 +1,84 @@
-"""SEC DCF Audit Engine — deterministic financial ingestion and accounting validation."""
+"""SEC DCF Audit Engine — deterministic ingestion, accounting validation, WACC, and DCF."""
 
+from sec_dcf.analysis import (
+    FredClient,
+    build_sensitivity_matrix,
+    calculate_wacc,
+    compute_historical_metrics,
+    fetch_risk_free_rate,
+    run_dcf_valuation,
+    suggest_dcf_assumptions,
+)
 from sec_dcf.exceptions import (
     AccountingValidationError,
     DataFetchError,
+    DcfValuationError,
     EdgarIdentityError,
+    FredApiError,
     MissingCriticalConceptError,
     SecDcfError,
     UnsupportedCompanyTypeError,
+    WaccCalculationError,
 )
 from sec_dcf.ingestion.edgar_client import EdgarClient, fetch_company_financials
 from sec_dcf.ingestion.normalizer import normalize_entity_facts
-from sec_dcf.models.financials import (
+from sec_dcf.models import (
     AnnualFinancialPeriod,
+    AnnualMetrics,
     AuditSourceKind,
     CompanyFinancialsReport,
+    DcfAssumptions,
+    DcfValuationResult,
+    EnterpriseToEquityBridge,
+    HistoricalMetricsReport,
     LineItemAudit,
+    ProjectedYearCashFlow,
+    RiskFreeRateQuote,
+    SensitivityCell,
+    SensitivityMatrix,
+    TerminalValueSummary,
     ValidationIssue,
+    WaccInputs,
+    WaccResult,
 )
 from sec_dcf.validation.accounting import validate_financials
 
 __all__ = [
     "AccountingValidationError",
     "AnnualFinancialPeriod",
+    "AnnualMetrics",
     "AuditSourceKind",
     "CompanyFinancialsReport",
     "DataFetchError",
+    "DcfAssumptions",
+    "DcfValuationError",
+    "DcfValuationResult",
     "EdgarClient",
     "EdgarIdentityError",
+    "EnterpriseToEquityBridge",
+    "FredApiError",
+    "FredClient",
+    "HistoricalMetricsReport",
     "LineItemAudit",
     "MissingCriticalConceptError",
+    "ProjectedYearCashFlow",
+    "RiskFreeRateQuote",
     "SecDcfError",
+    "SensitivityCell",
+    "SensitivityMatrix",
+    "TerminalValueSummary",
     "UnsupportedCompanyTypeError",
     "ValidationIssue",
+    "WaccCalculationError",
+    "WaccInputs",
+    "WaccResult",
+    "build_sensitivity_matrix",
+    "calculate_wacc",
+    "compute_historical_metrics",
     "fetch_company_financials",
+    "fetch_risk_free_rate",
     "normalize_entity_facts",
+    "run_dcf_valuation",
+    "suggest_dcf_assumptions",
     "validate_financials",
 ]

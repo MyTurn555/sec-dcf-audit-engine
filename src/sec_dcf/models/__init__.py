@@ -1,5 +1,27 @@
-"""Canonical Pydantic financial models."""
+"""Canonical Pydantic financial and valuation models."""
 
+from sec_dcf.models.analysis import (
+    AnnualMetrics,
+    CostOfDebtSource,
+    DcfAssumptions,
+    DcfValuationResult,
+    DiscountingConvention,
+    EnterpriseToEquityBridge,
+    EquityWeightSource,
+    HistoricalMetricsReport,
+    InitialNwcSource,
+    NopatTaxSource,
+    ProjectedYearCashFlow,
+    RiskFreeRateQuote,
+    RoicBasis,
+    SensitivityCell,
+    SensitivityMatrix,
+    SharesSource,
+    TerminalValueSummary,
+    WaccInputs,
+    WaccResult,
+    WaccTaxRateSource,
+)
 from sec_dcf.models.financials import (
     AnnualFinancialPeriod,
     AuditSourceKind,
@@ -10,8 +32,28 @@ from sec_dcf.models.financials import (
 
 __all__ = [
     "AnnualFinancialPeriod",
+    "AnnualMetrics",
     "AuditSourceKind",
     "CompanyFinancialsReport",
+    "CostOfDebtSource",
+    "DcfAssumptions",
+    "DcfValuationResult",
+    "DiscountingConvention",
+    "EnterpriseToEquityBridge",
+    "EquityWeightSource",
+    "HistoricalMetricsReport",
+    "InitialNwcSource",
     "LineItemAudit",
+    "NopatTaxSource",
+    "ProjectedYearCashFlow",
+    "RiskFreeRateQuote",
+    "RoicBasis",
+    "SensitivityCell",
+    "SensitivityMatrix",
+    "SharesSource",
+    "TerminalValueSummary",
     "ValidationIssue",
+    "WaccInputs",
+    "WaccResult",
+    "WaccTaxRateSource",
 ]

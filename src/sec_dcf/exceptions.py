@@ -23,3 +23,15 @@ class MissingCriticalConceptError(SecDcfError):
 
 class AccountingValidationError(SecDcfError):
     """Raised in strict validation mode when accounting integrity checks fail."""
+
+
+class FredApiError(SecDcfError):
+    """Raised when FRED API configuration, request, or payload parsing fails."""
+
+
+class WaccCalculationError(SecDcfError):
+    """Raised when WACC inputs or capital structure weights are invalid."""
+
+
+class DcfValuationError(SecDcfError):
+    """Raised when DCF assumptions or valuation invariants fail (e.g. WACC <= g)."""
