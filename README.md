@@ -1,6 +1,33 @@
-# SEC DCF Audit Engine — Moduły 1–4
+# SEC DCF Audit Engine
 
-Deterministyczny silnik pobierania, normalizacji XBRL, audytu księgowego (`10-K` / `10-K/A`), analizy wskaźnikowej, wyznaczania WACC, 5-letniej wyceny FCFF/DCF oraz audytowalnej analizy jakościowej raportów `10-K` (`Item 1A` i `Item 7`) dla spółek niefinansowych.
+**Automatyczny silnik wyceny DCF i audytu 10-K, który eliminuje błędy mapowania XBRL, niespójności księgowe leasingów ASC 842 oraz zniekształcenia wynagrodzeń w akcjach (SBC), łącząc w 100% deterministyczne obliczenia w Pythonie (`Decimal`) z weryfikowalnym audytem cytatów z raportów SEC 10-K.**
+
+### Szybkie linki
+- **Live Demo (Streamlit Community Cloud):** https://sec-dcf-audit-engine.streamlit.app/ *(darmowa instancja może potrzebować ~20–30 s na wybudzenie po dłuższym okresie bezczynności; domyślny tryb **Offline Demo** działa od razu bez żadnych kluczy API)*
+- **Założenia finansowe i księgowe:** [ASSUMPTIONS.md](ASSUMPTIONS.md)
+- **Zestaw testów offline (`pytest`):** **98 testów jednostkowych i integracyjnych** (100% offline, bez zapytań sieciowych)
+
+### Podgląd aplikacji (tryb Offline Demo)
+
+| 1. Fundamenty & Audyt XBRL (5Y) — `AMZN` | 2. Model WACC & DCF + Eksport `.xlsx` — `AMZN` |
+| :---: | :---: |
+| ![Fundamenty i Audyt XBRL 5Y](docs/screenshots/01_fundamentals_xbrl.png) | ![Model WACC, DCF i mnożniki rynkowe](docs/screenshots/02_dcf_multiples.png) |
+| *5 KPI z `True FCF ex-SBC`, status audytu XBRL oraz 5-letnie wykresy i tabela historyczna.* | *Wycena FCFF/DCF, eksport żywego arkusza `.xlsx`, most `EV → Equity` i mnożniki rynkowe.* |
+
+| 3. Wrażliwość & Monte Carlo (10 000 scenariuszy) | 4. Audyt Jakościowy 10-K (AI + Weryfikator Cytatów) |
+| :---: | :---: |
+| ![Mapa wrażliwości, Football Field i Monte Carlo](docs/screenshots/03_sensitivity_montecarlo.png) | ![Audyt jakościowy 10-K z odznakami weryfikacji](docs/screenshots/04_qualitative_audit.png) |
+| *Macierz `WACC × g`, wykres *Football Field* i zwektoryzowany rozkład Monte Carlo z pasem `P10–P90`.* | *Ekstrakcja `Item 1A` / `Item 7` przez `google-genai` i deterministyczna weryfikacja `verbatim_quote`.* |
+
+### Szybkie uruchomienie lokalne
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -e ".[dev,app]"
+pytest -v -W default                # 98 testów 100% offline
+streamlit run app/streamlit_app.py  # dashboard (Offline Demo lub Live BYOK)
+```
 
 ---
 
@@ -34,8 +61,10 @@ Moduł 2 (`sec_dcf.analysis`, `sec_dcf.models.analysis`) operuje wyłącznie na 
   - Koszt kapitału własnego w modelu CAPM (`Rf + beta * ERP`) z możliwością podania ręcznego `risk_free_rate` (tryb w 100% offline), wagi rynkowe kapitału (`market_cap_override` lub `share_price * shares`, opcjonalny `allow_book_equity_fallback`) oraz koszt długu przed i po podatku (z kontrolą wiarygodności `[Rf, 25%]` i fallbackiem `Rf + default_credit_spread`).
 - **`dcf.py` (`suggest_dcf_assumptions`, `run_dcf_valuation`, `build_sensitivity_matrix`)**:
   - Model 5-letnich założeń projekcji (`DcfAssumptions`, obsługujący stałe wartości `Decimal` lub 5-elementowe ścieżki rok-po-roku) wraz z funkcją wyznaczającą punkt startowy z median historycznych.
-  - Projekcja $FCFF_t = EBIT_t \cdot (1 - t) + D\&A_t - CapEx_t - \Delta NWC_t$ z obsługą dyskontowania `end_of_year` oraz `mid_year` ($t - 0.5$ dla $FCFF_t$ oraz $5.0$ dla wartości rezydualnej).
+  - Projekcja $FCFF_t = EBIT_t \cdot (1 - t) + D\&A_t - CapEx_t - \Delta NWC_t$ (z opcjonalnym `add_back_sbc`) i obsługą dyskontowania `end_of_year` oraz `mid_year` ($t - 0.5$ dla $FCFF_t$ oraz $5.0$ dla wartości rezydualnej).
   - Wartość rezydualna metodą Gordona (twardy wyjątek domenowy `DcfValuationError`, gdy $WACC \le g$, oraz ostrzeżenie przy $FCFF_5 \le 0$), opcjonalny cross-check mnożnikiem wyjścia `EV/EBITDA`, most `Enterprise Value -> Equity Value -> Implied Value per Share` oraz dwuwymiarowa macierz wrażliwości `WACC × terminal_growth_rate`.
+- **`monte_carlo.py` (`run_monte_carlo_dcf`)**:
+  - Zwektoryzowana w `numpy` symulacja Monte Carlo (`10 000` scenariuszy domyślnie) z jawnym `seed` dla 100% powtarzalności, obsługująca rozkład normalny i trójkątny (kopuła Gaussa), opcjonalną korelację `revenue_growth ↔ ebit_margin`, ochronę przed osobliwością Gordona (`min_wacc_g_spread`), spójność z `include_leases` / `add_back_sbc` oraz statystyki `Decimal` (`P10`, `P25`, `P50`, `P75`, `P90`, średnia, $\sigma$, neutralna częstość `prob_above_reference_price`).
 - **Spójna obsługa leasingów ASC 842 (`include_leases: bool`)**:
   - Flaga `include_leases` musi być spójna między `WaccResult` a `DcfAssumptions` (niezgodność zgłasza `DcfValuationError`).
   - Przy `include_leases=True` zobowiązania leasingowe są włączane konsekwentnie do `Invested Capital`, wag długu w WACC oraz odjęć w moście `EV -> Equity Value`. Zgodnie z US GAAP (ASC 842) koszt leasingu operacyjnego nie trafia do `interest_expense`, dlatego implikowany koszt długu `Kd` (bez override'u) wyliczany jest zawsze od oprocentowanego `financial_debt`, a `EBIT`/`EBITDA` nie są korygowane o implikowane odsetki leasingowe.
@@ -66,32 +95,20 @@ Moduł 4 udostępnia interaktywną warstwę wizualną w Streamlit + Plotly (`src
 
 - **Tryb Offline Demo (domyślny):** uruchamia się natychmiast bez kluczy API i bez połączeń sieciowych, wykorzystując lokalne próbki `AAPL`, `MSFT` i **`AMZN`** (`tests/fixtures/`) oraz próbkę audytu jakościowego (`sample_10k_sections.json`).
 - **Tryb Live (SEC EDGAR + FRED + BYOK Gemini):** pozwala wpisać dowolny ticker spółki niefinansowej, pobrać aktualne `DGS10` z FRED oraz uruchomić audyt 10-K na własnym kluczu `GEMINI_API_KEY` wpisywanym w polu `password` (przechowywanym wyłącznie w `st.session_state`, nigdy niezapisywanym na dysk ani w `st.cache_data`).
-- **Trzy zakładki + stały pasek boczny (u.o.i.f. / MAR):**
-  1. **Sprawozdania i wskaźniki (5Y):** status walidacji księgowej (`is_valid`, `validation_issues`, inspektor `audit_trail`), tabela 5Y (w tym `SBC`, `True FCF ex-SBC`, `SBC / Przychody`, `SBC / CFO`) i wykresy Plotly (Przychody/EBIT/FCF, ROIC i marże, Konwersja gotówki i CapEx/Revenue).
-  2. **WACC i wycena FCFF/DCF:** spójny przełącznik `include_leases` (ASC 842), `mid_year` vs `end_of_year`, jawny przełącznik `add_back_sbc` (koszt ekonomiczny w GAAP EBIT vs wariant CFO), edycja skalarna lub pełne ścieżki 5-letnie (`st.data_editor`), most `EV → Equity Value → Implied Value per Share`, konfrontacja bieżących mnożników rynkowych z mnożnikami implikowanymi z DCF (`EV/Revenue`, `EV/EBITDA`, `EV/EBIT`, `P/E`, `Reported FCF Yield`, `True FCF Yield ex-SBC`), mapa ciepła wrażliwości `WACC × g`, wykres przedziału wartości (*football field*) oraz **eksport audytowalnego pliku Excel `.xlsx` z żywymi formułami (`openpyxl`)**.
-  3. **Audyt jakościowy 10-K (AI):** wybór modelu (`gemini-3.8-flash`, `gemini-3.5-flash-lite`, `gemini-4-hydrogen`) z opcjonalnym automatycznym fallbackiem na `gemini-3.5-flash-lite` przy błędzie `503 UNAVAILABLE`, wskaźnik `verified_quote_ratio`, ostrzeżenie o przycięciu sekcji, detekcja pozabilansowych zobowiązań leasingowych (`leases not yet commenced`) w `red_flags` i karty z odznakami `quote_verified`.
+- **Cztery zakładki + stały pasek kontekstu i obramowany pasek boczny (u.o.i.f. / MAR):**
+  1. **1. Fundamenty & Audyt XBRL (5Y):** pasek 5 KPI (w tym `True FCF ex-SBC` i `Net Debt / EBITDA`), siatka 2-kolumnowa wykresów Plotly (Przychody/EBIT/FCF, ROIC i marże, Konwersja gotówki i CapEx/Revenue) + karta audytu księgowego XBRL, tabela 5Y oraz rozwijane panele uwag walidacyjnych, definicji i inspektora `audit_trail`.
+  2. **2. Model WACC & DCF:** pasek wyników wyceny wraz z głównym przyciskiem **eksportu audytowalnego pliku Excel `.xlsx` z żywymi formułami (`openpyxl`)**, dwukolumnowe kontrolki `WACC` i założeń `FCFF/DCF` (`include_leases` ASC 842, `mid_year` vs `end_of_year`, `add_back_sbc`, edycja skalarna lub 5Y `st.data_editor`), wykres **Waterfall `EV → Equity`**, tabela konfrontacji **bieżących i implikowanych mnożników rynkowych** oraz tabela prognoz 5Y.
+  3. **3. Wrażliwość & Monte Carlo:** zestawione obok siebie **mapa ciepła `WACC × g`** oraz wykres przedziału wyceny ***Football Field***, a poniżej pełna sekcja **symulacji Monte Carlo (10 000 scenariuszy)** z kartami `P10 / P50 / P90` i histogramem Plotly.
+  4. **4. Audyt Jakościowy 10-K (AI):** wybór modelu (`gemini-3.8-flash`, `gemini-3.5-flash-lite`, `gemini-4-hydrogen`) z opcjonalnym automatycznym fallbackiem na `gemini-3.5-flash-lite` przy błędzie `503 UNAVAILABLE`, metryki audytu (`verified_quote_ratio`, przycięcie sekcji, flagi zgodności), `Executive Summary` oraz podzakładki (`Ryzyka — Item 1A`, `Motory wzrostu — Item 7`, `Czerwone flagi`) z kartami i odznakami weryfikacji `quote_verified`.
 
 Szczegółowe definicje księgowe, obsługę ASC 842, traktowanie SBC (EBIT vs CFO), hierarchię tagów XBRL oraz znane ograniczenia opisuje plik [ASSUMPTIONS.md](ASSUMPTIONS.md).
 
-```powershell
-# Instalacja zależności dashboardu i uruchomienie aplikacji
-pip install -e ".[app]"
-streamlit run app/streamlit_app.py
-```
+### Publikacja na Streamlit Community Cloud
 
-### Podgląd interfejsu (tryb Offline Demo)
-
-**1. Sprawozdania i wskaźniki (5Y) — walidacja bilansowa XBRL i panel wskaźników:**
-
-![Zakładka 1 — Sprawozdania i wskaźniki 5Y](docs/screenshots/tab1_financials.png)
-
-**2. WACC i wycena FCFF/DCF — most EV → Equity, prognozy 5Y, wrażliwość i *football field*:**
-
-![Zakładka 2 — WACC i wycena FCFF/DCF](docs/screenshots/tab2_dcf_valuation.png)
-
-**3. Audyt jakościowy 10-K (AI) — weryfikacja cytatów `Item 1A` / `Item 7` i odznaki `quote_verified`:**
-
-![Zakładka 3 — Audyt jakościowy 10-K](docs/screenshots/tab3_qualitative_audit.png)
+Repozytorium zawiera plik [`requirements.txt`](requirements.txt) (`-e .[app]`) oraz konfigurację motywu [`.streamlit/config.toml`](.streamlit/config.toml). Przy wdrażaniu na Streamlit Community Cloud wskaż:
+- **Main file path:** `app/streamlit_app.py`
+- **Python version:** `3.11+`
+- Domyślny tryb **Offline Demo** działa natychmiast bez konfiguracji sekretów; w trybie **Live** użytkownik może wpisać własne klucze BYOK wyłącznie w pamięci sesji (`st.session_state`) lub skonfigurować sekrety w panelu Streamlit Cloud.
 
 ---
 

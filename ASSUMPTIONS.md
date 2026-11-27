@@ -72,6 +72,18 @@ Każda pozycja w `AnnualFinancialPeriod` posiada obiekt `LineItemAudit` w `audit
 
 ---
 
-## 7. Charakter edukacyjny i zgodność prawna
+## 7. Symulacja Monte Carlo DCF (`monte_carlo.py`)
 
-Projekt ma charakter wyłącznie edukacyjny, badawczy i inżynierski. Wszystkie parametry wejściowe (`Rf`, `Beta`, `ERP`, ścieżki 5Y, `g`, `include_leases`, `add_back_sbc`) podaje użytkownik. System nie generuje rekomendacji „Kup/Sprzedaj” ani „ceny docelowej” w rozumieniu `u.o.i.f.` oraz rozporządzenia `MAR` (UE nr 596/2014).
+Silnik symulacji Monte Carlo (`run_monte_carlo_dcf`, domyślnie `10 000` scenariuszy) jest w pełni deterministycznie odtwarzalny dzięki jawnemu generatorowi `numpy.random.default_rng(seed)` (`seed: int = 42` domyślnie):
+
+- **Zmienne niepewne i przesunięcie równoległe 5Y:** losowaniu podlegają odchylenia dla `WACC`, ścieżki wzrostu przychodów (`revenue_growth`), ścieżki marży operacyjnej (`ebit_margin`) oraz opcjonalnie stopy wzrostu rezydualnego (`terminal_growth_rate`). Wylosowane szoki $\Delta g_{\text{rev}}$ i $\Delta m_{\text{EBIT}}$ są nakładane jako **równoległe przesunięcie** bazowych wektorów 5-letnich z `DcfAssumptions`.
+- **Rozkłady i kopuła Gaussa:** obsługiwane są rozkład **normalny** (parametryzowany przez $\sigma$) oraz symetryczny rozkład **trójkątny** o identycznej wariancji (półszerokość $a = \sqrt{6}\,\sigma$). Opcjonalna korelacja `revenue_growth ↔ ebit_margin` ($\rho \in [-0.80, 0.80]$) realizowana jest przez dekompozycję Cholesky'ego oraz — przy rozkładzie trójkątnym — kopułę Gaussa z bezpiecznym przycięciem dystrybuanty normalnej $\Phi(z) \in [10^{-12}, 1 - 10^{-12}]$.
+- **Niezmienniczość dla $\sigma = 0$ i granice przycinania:** gdy dla danej zmiennej $\sigma = 0$, silnik nie wykonuje losowania ani przycinania do `bounds`, dzięki czemu zerowe odchylenia standardowe gwarantują zgodność z deterministycznym `run_dcf_valuation` również dla niestandardowych założeń bazowych. Dla $\sigma > 0$ stosowane są bezpieczne granice ekonomiczne (`WACC ∈ [0.5%, 40%]`, `revenue_growth ∈ [-50%, 100%]`, `ebit_margin ∈ [-50%, 80%]`, `g ∈ [-2%, 8%]`).
+- **Ochrona przed osobliwością Gordona (`min_wacc_g_spread`):** domyślny minimalny spread `WACC - g >= 50 pb` (`min_wacc_g_spread = 0.005`, lub `WACC > g` przy `min_wacc_g_spread = 0`) zapobiega zniekształceniu średniej i odchylenia standardowego przez losowania o niemal zerowym mianowniku. Niespełniające warunku losowania są odrzucane bez dociągania i raportowane jawnie w `valid_simulations` vs `discarded_simulations`.
+- **Spójność flag, podłoga `$0.00` i statystyka referencyjna:** symulacja zachowuje pełną zgodność z `include_leases`, `add_back_sbc` oraz `discounting_convention`, a surowe ujemne `Equity Value` jest ograniczane do `$0.00` na akcję (`floored_at_zero_count`). Przy podaniu `reference_share_price` raportowana jest wyłącznie neutralna częstość `prob_above_reference_price` o charakterze edukacyjnym.
+
+---
+
+## 8. Charakter edukacyjny i zgodność prawna
+
+Projekt ma charakter wyłącznie edukacyjny, badawczy i inżynierski. Wszystkie parametry wejściowe (`Rf`, `Beta`, `ERP`, ścieżki 5Y, `g`, `include_leases`, `add_back_sbc`, parametry rozkładów Monte Carlo) podaje użytkownik. System nie generuje rekomendacji „Kup/Sprzedaj” ani „ceny docelowej” w rozumieniu `u.o.i.f.` oraz rozporządzenia `MAR` (UE nr 596/2014).

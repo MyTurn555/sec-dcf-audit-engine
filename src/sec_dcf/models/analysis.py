@@ -388,3 +388,121 @@ class MarketMultiplesComparison(BaseModel):
     current: MultiplesSnapshot
     implied_dcf: MultiplesSnapshot
     notes: list[str] = Field(default_factory=list)
+
+
+MonteCarloDistribution = Literal["normal", "triangular"]
+
+
+class MonteCarloConfig(BaseModel):
+    """Configuration for deterministic, seed-reproducible Monte Carlo DCF simulation."""
+
+    model_config = ConfigDict(frozen=True)
+
+    n_simulations: int = Field(default=10_000, ge=100, le=200_000)
+    seed: int = Field(default=42)
+    distribution: MonteCarloDistribution = "normal"
+
+    wacc_std: Decimal = Field(default=Decimal("0.010"), ge=Decimal("0"), le=Decimal("0.20"))
+    revenue_growth_std: Decimal = Field(
+        default=Decimal("0.030"), ge=Decimal("0"), le=Decimal("0.50")
+    )
+    ebit_margin_std: Decimal = Field(
+        default=Decimal("0.025"), ge=Decimal("0"), le=Decimal("0.50")
+    )
+    terminal_growth_std: Decimal = Field(
+        default=Decimal("0.005"), ge=Decimal("0"), le=Decimal("0.10")
+    )
+    growth_margin_correlation: Decimal = Field(
+        default=Decimal("0.0"), ge=Decimal("-0.80"), le=Decimal("0.80")
+    )
+    min_wacc_g_spread: Decimal = Field(
+        default=Decimal("0.005"), ge=Decimal("0"), le=Decimal("0.20")
+    )
+    reference_share_price: Decimal | None = Field(default=None, gt=Decimal("0"))
+
+    wacc_bounds: tuple[Decimal, Decimal] = (Decimal("0.005"), Decimal("0.40"))
+    revenue_growth_bounds: tuple[Decimal, Decimal] = (Decimal("-0.50"), Decimal("1.00"))
+    ebit_margin_bounds: tuple[Decimal, Decimal] = (Decimal("-0.50"), Decimal("0.80"))
+    terminal_growth_bounds: tuple[Decimal, Decimal] = (Decimal("-0.02"), Decimal("0.08"))
+
+    @field_validator(
+        "wacc_bounds",
+        "revenue_growth_bounds",
+        "ebit_margin_bounds",
+        "terminal_growth_bounds",
+    )
+    @classmethod
+    def validate_bounds_order(
+        cls, bounds: tuple[Decimal, Decimal]
+    ) -> tuple[Decimal, Decimal]:
+        """Ensure clipping bounds form a valid (low < high) interval."""
+        low, high = bounds
+        if low >= high:
+            raise ValueError(f"Invalid clipping bounds ({low}, {high}): lower bound must be < upper.")
+        return bounds
+
+    @field_validator("wacc_bounds")
+    @classmethod
+    def validate_positive_wacc_bounds(
+        cls, bounds: tuple[Decimal, Decimal]
+    ) -> tuple[Decimal, Decimal]:
+        """Ensure sampled WACC lower bound remains strictly positive."""
+        if bounds[0] <= Decimal("0"):
+            raise ValueError(f"wacc_bounds lower limit must be > 0, got {bounds[0]}.")
+        return bounds
+
+    @field_validator("revenue_growth_bounds")
+    @classmethod
+    def validate_revenue_growth_bounds(
+        cls, bounds: tuple[Decimal, Decimal]
+    ) -> tuple[Decimal, Decimal]:
+        """Ensure sampled revenue growth stays strictly above -100%."""
+        if bounds[0] <= Decimal("-1"):
+            raise ValueError(f"revenue_growth_bounds lower limit must be > -1.0, got {bounds[0]}.")
+        return bounds
+
+    @field_validator("terminal_growth_bounds")
+    @classmethod
+    def validate_terminal_growth_bounds(
+        cls, bounds: tuple[Decimal, Decimal]
+    ) -> tuple[Decimal, Decimal]:
+        """Ensure sampled terminal growth stays within (-1, 1)."""
+        if bounds[0] <= Decimal("-1") or bounds[1] >= Decimal("1"):
+            raise ValueError(
+                f"terminal_growth_bounds must lie strictly within (-1, 1), got {bounds}."
+            )
+        return bounds
+
+
+class MonteCarloResult(BaseModel):
+    """Aggregated statistics and distribution values from a Monte Carlo DCF simulation."""
+
+    model_config = ConfigDict(frozen=True)
+
+    ticker: str
+    seed: int
+    distribution: MonteCarloDistribution
+    total_simulations: int
+    valid_simulations: int
+    discarded_simulations: int
+    floored_at_zero_count: int
+    min_wacc_g_spread: Decimal
+    include_leases: bool
+    add_back_sbc: bool
+    discounting_convention: DiscountingConvention
+    base_implied_value_per_share: Decimal | None = None
+
+    mean_value_per_share: Decimal | None = None
+    std_value_per_share: Decimal | None = None
+    min_value_per_share: Decimal | None = None
+    max_value_per_share: Decimal | None = None
+    p10_value_per_share: Decimal | None = None
+    p25_value_per_share: Decimal | None = None
+    p50_value_per_share: Decimal | None = None
+    p75_value_per_share: Decimal | None = None
+    p90_value_per_share: Decimal | None = None
+
+    reference_share_price: Decimal | None = None
+    prob_above_reference_price: Decimal | None = None
+    simulated_values_per_share: tuple[float, ...] = ()
+    notes: list[str] = Field(default_factory=list)

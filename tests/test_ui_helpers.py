@@ -186,6 +186,16 @@ def test_charts_and_resilience_when_all_sensitivity_cells_invalid_or_equity_floo
     assert len(fig_heat.data) == 1
     assert len(fig_ff.data) >= 2
 
+    # Verify unified institutional palette & horizontal gridline styling
+    from sec_dcf.ui.charts import PALETTE_EMERALD, PALETTE_NAVY, PALETTE_RED, PALETTE_SLATE, PALETTE_STEEL
+
+    assert fig_rev.data[0].marker.color == PALETTE_NAVY
+    assert fig_rev.data[1].marker.color == PALETTE_STEEL
+    assert fig_rev.data[2].marker.color == PALETTE_EMERALD
+    assert fig_roic.data[3].line.color == PALETTE_SLATE == "#64748B"
+    assert fig_cash.data[1].line.color == PALETTE_RED
+    assert fig_rev.layout.yaxis.gridcolor == "#E2E8F0"
+
     # Ensure zero buy/sell or target price wording in chart titles and legal disclaimer
     for title_text in (fig_ff.layout.title.text, LEGAL_DISCLAIMER_PL):
         lowered = title_text.lower()

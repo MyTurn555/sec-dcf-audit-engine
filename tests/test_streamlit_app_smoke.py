@@ -1,4 +1,4 @@
-"""Offline Streamlit AppTest smoke tests verifying Offline Demo mode."""
+"""Offline Streamlit AppTest smoke tests verifying Offline Demo mode and 4-tab layout."""
 
 from __future__ import annotations
 
@@ -26,16 +26,33 @@ def block_all_network_calls(monkeypatch):
 
 
 def test_streamlit_app_offline_demo_smoke_and_ticker_switch():
-    at = AppTest.from_file(str(APP_PATH), default_timeout=20)
+    at = AppTest.from_file(str(APP_PATH), default_timeout=25)
     at.run()
 
     assert not at.exception
-    assert len(at.tabs) == 3
+
+    tab_labels = [t.label for t in at.tabs]
+    for expected_tab in (
+        "1. Fundamenty & Audyt XBRL (5Y)",
+        "2. Model WACC & DCF",
+        "3. Wrażliwość & Monte Carlo",
+        "4. Audyt Jakościowy 10-K (AI)",
+    ):
+        assert expected_tab in tab_labels
+
+    # Verify Tab 4 qualitative sub-tabs are also rendered
+    assert any(lbl.startswith("Ryzyka — Item 1A") for lbl in tab_labels)
+    assert any(lbl.startswith("Motory wzrostu — Item 7") for lbl in tab_labels)
+    assert any(lbl.startswith("Czerwone flagi") for lbl in tab_labels)
 
     # Verify persistent legal disclaimer is rendered in sidebar
     sidebar_info_texts = " ".join(box.value for box in at.sidebar.info)
     assert "u.o.i.f." in sidebar_info_texts
     assert "MAR" in sidebar_info_texts
+
+    # Verify BYOK key inputs are hidden in Offline Demo mode
+    sidebar_input_keys = {inp.key for inp in at.sidebar.text_input}
+    assert "session_gemini_api_key" not in sidebar_input_keys
 
     # Switch demo ticker AAPL -> MSFT -> AMZN and verify automatic valuation context reset
     at.sidebar.selectbox(key="demo_ticker").select("MSFT").run()
@@ -59,3 +76,10 @@ def test_streamlit_app_offline_demo_smoke_and_ticker_switch():
     # Switch Tab 2 to 5Y data_editor mode and verify clean rerun
     at.toggle(key="dcf_edit_mode_5y").set_value(True).run()
     assert not at.exception
+
+    # Force WACC <= g valuation error and verify graceful warning in Tab 2 & Tab 3 (no NoneType crash)
+    at.number_input(key="dcf_terminal_g_pct").set_value(8.0).run()
+    at.number_input(key="wacc_rf_pct").set_value(0.5).run()
+    at.number_input(key="wacc_erp_pct").set_value(1.0).run()
+    assert not at.exception
+    assert len(at.warning) >= 2

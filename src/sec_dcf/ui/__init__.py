@@ -5,6 +5,7 @@ from __future__ import annotations
 from sec_dcf.ui.charts import (
     create_cash_conversion_capex_chart,
     create_ev_bridge_waterfall_chart,
+    create_monte_carlo_histogram,
     create_revenue_ebit_fcf_chart,
     create_roic_and_margins_chart,
     create_sensitivity_heatmap,
@@ -64,6 +65,7 @@ __all__ = [
     "build_validation_summary",
     "create_cash_conversion_capex_chart",
     "create_ev_bridge_waterfall_chart",
+    "create_monte_carlo_histogram",
     "create_revenue_ebit_fcf_chart",
     "create_roic_and_margins_chart",
     "create_sensitivity_heatmap",
