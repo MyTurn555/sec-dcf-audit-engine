@@ -37,11 +37,20 @@ def test_streamlit_app_offline_demo_smoke_and_ticker_switch():
     assert "u.o.i.f." in sidebar_info_texts
     assert "MAR" in sidebar_info_texts
 
-    # Switch demo ticker AAPL -> MSFT and verify automatic valuation context reset
+    # Switch demo ticker AAPL -> MSFT -> AMZN and verify automatic valuation context reset
     at.sidebar.selectbox(key="demo_ticker").select("MSFT").run()
     assert not at.exception
     assert at.session_state["active_valuation_context"] == ("Offline Demo", "MSFT")
     assert at.session_state["wacc_share_price"] == 425.0
+
+    at.sidebar.selectbox(key="demo_ticker").select("AMZN").run()
+    assert not at.exception
+    assert at.session_state["active_valuation_context"] == ("Offline Demo", "AMZN")
+    assert at.session_state["wacc_share_price"] == 210.0
+
+    # Toggle add_back_sbc and verify clean rerun
+    at.toggle(key="dcf_add_back_sbc").set_value(True).run()
+    assert not at.exception
 
     # Toggle include_leases off and verify clean rerun
     at.sidebar.toggle(key="include_leases_toggle").set_value(False).run()

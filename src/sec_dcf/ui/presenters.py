@@ -14,6 +14,7 @@ from sec_dcf.models.analysis import (
     DcfValuationResult,
     DiscountingConvention,
     HistoricalMetricsReport,
+    MarketMultiplesComparison,
     SensitivityMatrix,
 )
 from sec_dcf.models.financials import CompanyFinancialsReport
@@ -48,6 +49,7 @@ FIVE_YEAR_FIELD_SPECS: tuple[tuple[str, str, bool], ...] = (
     ("da_pct_revenue", "D&A / Przychody (%)", True),
     ("capex_pct_revenue", "CapEx / Przychody (%)", True),
     ("nwc_pct_revenue", "Non-cash NWC / Przychody (%)", True),
+    ("sbc_pct_revenue", "SBC / Przychody (%)", True),
 )
 
 
@@ -133,7 +135,9 @@ def build_historical_metrics_dataframe(metrics: HistoricalMetricsReport) -> pd.D
                 "EBIT ($ mld)": _to_billions_float(p.ebit),
                 "EBITDA ($ mld)": _to_billions_float(p.ebitda),
                 "Zysk netto ($ mld)": _to_billions_float(p.net_income),
+                "SBC ($ mld)": _to_billions_float(p.sbc),
                 "Simple FCF ($ mld)": _to_billions_float(p.fcf_simple),
+                "True FCF ex-SBC ($ mld)": _to_billions_float(p.fcf_ex_sbc),
                 "Marża EBIT (%)": _to_pct_float(p.ebit_margin),
                 "Marża EBITDA (%)": _to_pct_float(p.ebitda_margin),
                 "Stopa podatkowa NOPAT (%)": _to_pct_float(p.nopat_tax_rate),
@@ -141,6 +145,8 @@ def build_historical_metrics_dataframe(metrics: HistoricalMetricsReport) -> pd.D
                 "Konwersja gotówki (%)": _to_pct_float(p.cash_conversion),
                 "CapEx / Przychody (%)": _to_pct_float(p.capex_to_revenue),
                 "D&A / Przychody (%)": _to_pct_float(p.da_to_revenue),
+                "SBC / Przychody (%)": _to_pct_float(p.sbc_to_revenue),
+                "SBC / CFO (%)": _to_pct_float(p.sbc_to_cfo),
                 "Net Debt ($ mld)": _to_billions_float(net_debt),
                 "Net Debt / EBITDA": float(net_debt_ebitda) if net_debt_ebitda is not None else None,
             }
@@ -201,6 +207,7 @@ def dataframe_to_dcf_assumptions(
     terminal_growth_rate: Decimal,
     discounting_convention: DiscountingConvention,
     include_leases: bool,
+    add_back_sbc: bool = False,
     exit_ebitda_multiple: Decimal | None = None,
     initial_nwc_override: Decimal | None = None,
     shares_override: Decimal | None = None,
@@ -219,6 +226,9 @@ def dataframe_to_dcf_assumptions(
 
     for attr_name, col_label, is_pct in FIVE_YEAR_FIELD_SPECS:
         if col_label not in df.columns:
+            if attr_name == "sbc_pct_revenue":
+                parsed_vectors[attr_name] = (Decimal("0"),) * 5
+                continue
             raise DcfValuationError(f"Brak wymaganej kolumny '{col_label}' w tabeli założeń 5Y.")
         values = tuple(
             _parse_numeric_cell(
@@ -239,6 +249,8 @@ def dataframe_to_dcf_assumptions(
             da_pct_revenue=parsed_vectors["da_pct_revenue"],
             capex_pct_revenue=parsed_vectors["capex_pct_revenue"],
             nwc_pct_revenue=parsed_vectors["nwc_pct_revenue"],
+            sbc_pct_revenue=parsed_vectors["sbc_pct_revenue"],
+            add_back_sbc=add_back_sbc,
             terminal_growth_rate=terminal_growth_rate,
             discounting_convention=discounting_convention,
             include_leases=include_leases,
@@ -248,6 +260,60 @@ def dataframe_to_dcf_assumptions(
         )
     except Exception as exc:  # noqa: BLE001
         raise DcfValuationError(f"Nieprawidłowe założenia 5Y: {exc}") from None
+
+
+def build_multiples_comparison_dataframe(
+    comparison: MarketMultiplesComparison,
+) -> pd.DataFrame:
+    """Format Current Market vs. Implied DCF multiples into a clean comparison table."""
+
+    def _fmt_mult(val: Decimal | None) -> str:
+        return f"{val:.2f}x" if val is not None else "N/A"
+
+    def _fmt_yield(val: Decimal | None) -> str:
+        return f"{val * PERCENT_SCALE:.2f}%" if val is not None else "N/A"
+
+    cur = comparison.current
+    imp = comparison.implied_dcf
+    rows = [
+        {
+            "Mnożnik / Stopa zwrotu": "EV / Revenue",
+            "Bieżący rynek": _fmt_mult(cur.ev_to_revenue),
+            "Implikowany z DCF": _fmt_mult(imp.ev_to_revenue),
+            "Podstawa": f"FY{comparison.fiscal_year} Revenue",
+        },
+        {
+            "Mnożnik / Stopa zwrotu": "EV / EBITDA",
+            "Bieżący rynek": _fmt_mult(cur.ev_to_ebitda),
+            "Implikowany z DCF": _fmt_mult(imp.ev_to_ebitda),
+            "Podstawa": f"FY{comparison.fiscal_year} EBITDA",
+        },
+        {
+            "Mnożnik / Stopa zwrotu": "EV / EBIT",
+            "Bieżący rynek": _fmt_mult(cur.ev_to_ebit),
+            "Implikowany z DCF": _fmt_mult(imp.ev_to_ebit),
+            "Podstawa": f"FY{comparison.fiscal_year} EBIT",
+        },
+        {
+            "Mnożnik / Stopa zwrotu": "P / E",
+            "Bieżący rynek": _fmt_mult(cur.pe_ratio),
+            "Implikowany z DCF": _fmt_mult(imp.pe_ratio),
+            "Podstawa": f"Equity / FY{comparison.fiscal_year} Net Income",
+        },
+        {
+            "Mnożnik / Stopa zwrotu": "Reported FCF Yield",
+            "Bieżący rynek": _fmt_yield(cur.reported_fcf_yield),
+            "Implikowany z DCF": _fmt_yield(imp.reported_fcf_yield),
+            "Podstawa": "(CFO - CapEx) / Equity",
+        },
+        {
+            "Mnożnik / Stopa zwrotu": "True FCF Yield (ex-SBC)",
+            "Bieżący rynek": _fmt_yield(cur.true_fcf_yield_ex_sbc),
+            "Implikowany z DCF": _fmt_yield(imp.true_fcf_yield_ex_sbc),
+            "Podstawa": "(CFO - CapEx - SBC) / Equity",
+        },
+    ]
+    return pd.DataFrame(rows)
 
 
 def build_dcf_projections_dataframe(result: DcfValuationResult) -> pd.DataFrame:

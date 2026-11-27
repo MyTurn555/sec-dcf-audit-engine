@@ -64,12 +64,14 @@ Moduł 3 (`sec_dcf.qualitative`, `sec_dcf.models.qualitative`) łączy ekstrakcj
 
 Moduł 4 udostępnia interaktywną warstwę wizualną w Streamlit + Plotly (`src/sec_dcf/ui/`, `app/streamlit_app.py`), bez duplikowania jakiejkolwiek matematyki finansowej:
 
-- **Tryb Offline Demo (domyślny):** uruchamia się natychmiast bez kluczy API i bez połączeń sieciowych, wykorzystując lokalne próbki `AAPL` i `MSFT` (`tests/fixtures/`) oraz próbkę audytu jakościowego (`sample_10k_sections.json`).
+- **Tryb Offline Demo (domyślny):** uruchamia się natychmiast bez kluczy API i bez połączeń sieciowych, wykorzystując lokalne próbki `AAPL`, `MSFT` i **`AMZN`** (`tests/fixtures/`) oraz próbkę audytu jakościowego (`sample_10k_sections.json`).
 - **Tryb Live (SEC EDGAR + FRED + BYOK Gemini):** pozwala wpisać dowolny ticker spółki niefinansowej, pobrać aktualne `DGS10` z FRED oraz uruchomić audyt 10-K na własnym kluczu `GEMINI_API_KEY` wpisywanym w polu `password` (przechowywanym wyłącznie w `st.session_state`, nigdy niezapisywanym na dysk ani w `st.cache_data`).
 - **Trzy zakładki + stały pasek boczny (u.o.i.f. / MAR):**
-  1. **Sprawozdania i wskaźniki (5Y):** status walidacji księgowej (`is_valid`, `validation_issues`, inspektor `audit_trail`), tabela 5Y i wykresy Plotly (Przychody/EBIT/FCF, ROIC i marże, Konwersja gotówki i CapEx/Revenue).
-  2. **WACC i wycena FCFF/DCF:** spójny przełącznik `include_leases` (ASC 842), `mid_year` vs `end_of_year`, edycja skalarna lub pełne ścieżki 5-letnie (`st.data_editor`), most `EV → Equity Value → Implied Value per Share`, mapa ciepła wrażliwości `WACC × g` oraz wykres przedziału wartości (*football field*).
-  3. **Audyt jakościowy 10-K (AI):** wybór modelu (`gemini-3.8-flash`, `gemini-3.5-flash-lite`, `gemini-4-hydrogen`) z opcjonalnym automatycznym fallbackiem na `gemini-3.5-flash-lite` przy błędzie `503 UNAVAILABLE`, wskaźnik `verified_quote_ratio`, ostrzeżenie o przycięciu sekcji i karty z odznakami `quote_verified`.
+  1. **Sprawozdania i wskaźniki (5Y):** status walidacji księgowej (`is_valid`, `validation_issues`, inspektor `audit_trail`), tabela 5Y (w tym `SBC`, `True FCF ex-SBC`, `SBC / Przychody`, `SBC / CFO`) i wykresy Plotly (Przychody/EBIT/FCF, ROIC i marże, Konwersja gotówki i CapEx/Revenue).
+  2. **WACC i wycena FCFF/DCF:** spójny przełącznik `include_leases` (ASC 842), `mid_year` vs `end_of_year`, jawny przełącznik `add_back_sbc` (koszt ekonomiczny w GAAP EBIT vs wariant CFO), edycja skalarna lub pełne ścieżki 5-letnie (`st.data_editor`), most `EV → Equity Value → Implied Value per Share`, konfrontacja bieżących mnożników rynkowych z mnożnikami implikowanymi z DCF (`EV/Revenue`, `EV/EBITDA`, `EV/EBIT`, `P/E`, `Reported FCF Yield`, `True FCF Yield ex-SBC`), mapa ciepła wrażliwości `WACC × g`, wykres przedziału wartości (*football field*) oraz **eksport audytowalnego pliku Excel `.xlsx` z żywymi formułami (`openpyxl`)**.
+  3. **Audyt jakościowy 10-K (AI):** wybór modelu (`gemini-3.8-flash`, `gemini-3.5-flash-lite`, `gemini-4-hydrogen`) z opcjonalnym automatycznym fallbackiem na `gemini-3.5-flash-lite` przy błędzie `503 UNAVAILABLE`, wskaźnik `verified_quote_ratio`, ostrzeżenie o przycięciu sekcji, detekcja pozabilansowych zobowiązań leasingowych (`leases not yet commenced`) w `red_flags` i karty z odznakami `quote_verified`.
+
+Szczegółowe definicje księgowe, obsługę ASC 842, traktowanie SBC (EBIT vs CFO), hierarchię tagów XBRL oraz znane ograniczenia opisuje plik [ASSUMPTIONS.md](ASSUMPTIONS.md).
 
 ```powershell
 # Instalacja zależności dashboardu i uruchomienie aplikacji
@@ -169,7 +171,7 @@ pip install -e ".[dev,app]"
 pytest -v
 ```
 
-> Wszystkie testy `pytest` (Moduły 1–4, w tym testy logiki UI i `AppTest` dla dashboardu) działają w **100% offline** — korzystają z lokalnych próbek w `tests/fixtures/` (`aapl_companyfacts.json`, `msft_companyfacts.json`, `sample_10k_sections.json`) oraz mockowanych transportów, blokując jakiekolwiek wywołania sieciowe do SEC EDGAR, FRED API oraz Gemini API. Konfiguracja `pythonpath = ["src"]` w `pyproject.toml` umożliwia uruchamianie `.\.venv\Scripts\python.exe -m pytest -v` również bezpośrednio bez wcześniejszej instalacji edytowalnej.
+> Wszystkie testy `pytest` (Moduły 1–4, eksport `.xlsx`, mnożniki rynkowe, testy logiki UI i `AppTest` dla dashboardu) działają w **100% offline** — korzystają z lokalnych próbek w `tests/fixtures/` (`aapl_companyfacts.json`, `msft_companyfacts.json`, `amzn_companyfacts.json`, `sample_10k_sections.json`) oraz mockowanych transportów, blokując jakiekolwiek wywołania sieciowe do SEC EDGAR, FRED API oraz Gemini API. Konfiguracja `pythonpath = ["src"]` w `pyproject.toml` umożliwia uruchamianie `.\.venv\Scripts\python.exe -m pytest -v` również bezpośrednio bez wcześniejszej instalacji edytowalnej.
 
 ---
 

@@ -29,7 +29,8 @@ STRICT RULES:
 4. Every single item in `risks`, `growth_drivers`, and `red_flags` MUST include:
    - `section`: exact section identifier ("Item 1A" or "Item 7") where the quote appears;
    - `verbatim_quote`: an exact, word-for-word substring copied from that section (do NOT paraphrase, merge non-adjacent sentences with ellipses, or invent quotes).
-5. Prefer concise, concrete disclosures over generic boilerplate."""
+5. In `red_flags`, explicitly check Item 7 (MD&A) for material off-balance-sheet, uncommenced lease commitments (e.g. data center, fulfillment, or build-to-suit "leases not yet commenced" not yet recognized on the balance sheet under ASC 842) and extract them with an exact `verbatim_quote` when disclosed.
+6. Prefer concise, concrete disclosures over generic boilerplate."""
 
 
 def _mask_api_key(message: str, api_key: str | None) -> str:

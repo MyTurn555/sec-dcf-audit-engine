@@ -83,6 +83,10 @@ class AnnualMetrics(BaseModel):
 
     # Cash conversion & capital intensity
     fcf_simple: Decimal
+    sbc: Decimal = Decimal("0")
+    fcf_ex_sbc: Decimal | None = None
+    sbc_to_revenue: Decimal | None = None
+    sbc_to_cfo: Decimal | None = None
     cash_conversion: Decimal | None = None
     capex_to_revenue: Decimal | None = None
     da_to_revenue: Decimal | None = None
@@ -182,6 +186,8 @@ class DcfAssumptions(BaseModel):
     da_pct_revenue: FiveYearSeries
     capex_pct_revenue: FiveYearSeries
     nwc_pct_revenue: FiveYearSeries
+    sbc_pct_revenue: FiveYearSeries = (Decimal("0"),) * 5
+    add_back_sbc: bool = False
     terminal_growth_rate: Decimal = Field(gt=Decimal("-1"), lt=Decimal("1"))
     discounting_convention: DiscountingConvention = "mid_year"
     include_leases: bool = False
@@ -222,12 +228,12 @@ class DcfAssumptions(BaseModel):
                 raise ValueError(f"tax_rate must be between 0 and 1, got {val}")
         return values
 
-    @field_validator("da_pct_revenue", "capex_pct_revenue")
+    @field_validator("da_pct_revenue", "capex_pct_revenue", "sbc_pct_revenue")
     @classmethod
     def validate_non_negative_pct(
         cls, values: tuple[Decimal, Decimal, Decimal, Decimal, Decimal]
     ) -> tuple[Decimal, Decimal, Decimal, Decimal, Decimal]:
-        """D&A and CapEx percentages of revenue must be non-negative."""
+        """D&A, CapEx, and SBC percentages of revenue must be non-negative."""
         for val in values:
             if val < Decimal("0"):
                 raise ValueError(f"Percentage of revenue must be >= 0, got {val}")
@@ -246,6 +252,7 @@ class ProjectedYearCashFlow(BaseModel):
     tax_rate: Decimal
     nopat: Decimal
     da: Decimal
+    sbc: Decimal = Decimal("0")
     capex: Decimal
     nwc: Decimal
     delta_nwc: Decimal
@@ -308,11 +315,14 @@ class DcfValuationResult(BaseModel):
     initial_nwc_source: InitialNwcSource
     wacc: Decimal
     include_leases: bool
+    add_back_sbc: bool = False
     discounting_convention: DiscountingConvention
     projections: list[ProjectedYearCashFlow]
     pv_projected_fcff: Decimal
     terminal_value: TerminalValueSummary
     bridge: EnterpriseToEquityBridge
+    sbc_valuation_impact_ev: Decimal = Decimal("0")
+    sbc_valuation_impact_per_share: Decimal = Decimal("0")
     notes: list[str] = Field(default_factory=list)
 
 
@@ -343,3 +353,38 @@ class SensitivityMatrix(BaseModel):
     max_implied_value_per_share: Decimal | None = None
     base_wacc: Decimal
     base_terminal_growth_rate: Decimal
+
+
+class MultiplesSnapshot(BaseModel):
+    """Valuation multiples and cash yields for one valuation basis (Market or DCF)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    ev_to_revenue: Decimal | None = None
+    ev_to_ebitda: Decimal | None = None
+    ev_to_ebit: Decimal | None = None
+    pe_ratio: Decimal | None = None
+    reported_fcf_yield: Decimal | None = None
+    true_fcf_yield_ex_sbc: Decimal | None = None
+
+
+class MarketMultiplesComparison(BaseModel):
+    """Deterministic comparison of Current Market Multiples vs. Implied DCF Multiples."""
+
+    model_config = ConfigDict(frozen=True)
+
+    ticker: str
+    fiscal_year: int
+    include_leases: bool
+    shares_used: Decimal | None = None
+    shares_source: SharesSource | None = None
+    share_price_used: Decimal | None = None
+    current_market_cap: Decimal | None = None
+    net_debt: Decimal
+    noncontrolling_interest: Decimal
+    current_enterprise_value: Decimal | None = None
+    dcf_enterprise_value: Decimal | None = None
+    dcf_implied_equity_value: Decimal | None = None
+    current: MultiplesSnapshot
+    implied_dcf: MultiplesSnapshot
+    notes: list[str] = Field(default_factory=list)

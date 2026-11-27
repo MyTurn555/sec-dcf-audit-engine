@@ -332,3 +332,48 @@ def test_aggregate_finance_lease_liability_fallback_and_anti_double_count():
     p_comb = rep_comb.periods[0]
     assert p_comb.noncurrent_lease_liabilities == Decimal("40000000")
     assert any(i.code == "DEBT_INCLUDES_FINANCE_LEASES" for i in rep_comb.validation_issues)
+
+
+def test_sbc_mapping_fallback_and_zero_if_absent_audit_trail():
+    # 1. Exact us-gaap:ShareBasedCompensation
+    concepts_exact = standard_year_concepts()
+    concepts_exact["us-gaap:ShareBasedCompensation"] = [
+        {
+            "val": 25_000_000,
+            "start": "2025-01-01",
+            "end": "2025-12-31",
+            "filed": "2026-02-01",
+            "form": "10-K",
+            "unit": "USD",
+        }
+    ]
+    p_exact = normalize_entity_facts(build_synthetic_entity_facts(concepts_exact), years=1, strict=True).periods[0]
+    assert p_exact.sbc == Decimal("25000000")
+    assert p_exact.fcf_ex_sbc == Decimal("125000000")  # 210M CFO - 60M CapEx - 25M SBC
+    assert p_exact.audit_trail["sbc"].source_kind == "tag_exact"
+    assert p_exact.audit_trail["sbc"].concept == "us-gaap:ShareBasedCompensation"
+
+    # 2. Fallback us-gaap:AllocatedShareBasedCompensationExpense
+    concepts_fb = standard_year_concepts()
+    concepts_fb["us-gaap:AllocatedShareBasedCompensationExpense"] = [
+        {
+            "val": 18_000_000,
+            "start": "2025-01-01",
+            "end": "2025-12-31",
+            "filed": "2026-02-01",
+            "form": "10-K",
+            "unit": "USD",
+        }
+    ]
+    p_fb = normalize_entity_facts(build_synthetic_entity_facts(concepts_fb), years=1, strict=True).periods[0]
+    assert p_fb.sbc == Decimal("18000000")
+    assert p_fb.audit_trail["sbc"].source_kind == "tag_fallback"
+    assert p_fb.audit_trail["sbc"].concept == "us-gaap:AllocatedShareBasedCompensationExpense"
+
+    # 3. Absent -> zero_if_absent with full audit_trail
+    p_absent = normalize_entity_facts(
+        build_synthetic_entity_facts(standard_year_concepts()), years=1, strict=True
+    ).periods[0]
+    assert p_absent.sbc == Decimal("0")
+    assert p_absent.fcf_ex_sbc == p_absent.fcf_simple
+    assert p_absent.audit_trail["sbc"].source_kind == "zero_if_absent"

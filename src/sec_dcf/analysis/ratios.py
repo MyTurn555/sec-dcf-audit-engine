@@ -169,6 +169,8 @@ def compute_historical_metrics(
 
         capex_to_revenue = _safe_ratio(period.capex, period.revenue)
         da_to_revenue = _safe_ratio(period.da, period.revenue)
+        sbc_to_revenue = _safe_ratio(period.sbc, period.revenue)
+        sbc_to_cfo = _safe_ratio(period.sbc, period.cfo)
         non_cash_nwc_to_revenue = (
             _safe_ratio(period.non_cash_nwc, period.revenue)
             if period.non_cash_nwc is not None
@@ -211,6 +213,10 @@ def compute_historical_metrics(
                 roic_basis=roic_basis,
                 roic=roic,
                 fcf_simple=period.fcf_simple,
+                sbc=period.sbc,
+                fcf_ex_sbc=period.fcf_ex_sbc,
+                sbc_to_revenue=sbc_to_revenue,
+                sbc_to_cfo=sbc_to_cfo,
                 cash_conversion=cash_conversion,
                 capex_to_revenue=capex_to_revenue,
                 da_to_revenue=da_to_revenue,

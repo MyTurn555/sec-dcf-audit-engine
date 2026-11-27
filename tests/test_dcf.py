@@ -242,7 +242,7 @@ def test_sensitivity_matrix_range_monotonicity_and_all_invalid_edge_case():
     assert all_invalid.max_implied_value_per_share is None
 
 
-@pytest.mark.parametrize("fixture_name", ["aapl_fixture", "msft_fixture"])
+@pytest.mark.parametrize("fixture_name", ["aapl_fixture", "msft_fixture", "amzn_fixture"])
 def test_end_to_end_offline_sec_fixture_wacc_dcf_and_sensitivity(request, fixture_name):
     raw, facts = request.getfixturevalue(fixture_name)
     report = normalize_entity_facts(
@@ -267,6 +267,9 @@ def test_end_to_end_offline_sec_fixture_wacc_dcf_and_sensitivity(request, fixtur
     dcf = run_dcf_valuation(report, assumptions, wacc_res)
     assert dcf.bridge.enterprise_value > Decimal("0")
     assert dcf.bridge.implied_value_per_share > Decimal("0")
+    assert assumptions.add_back_sbc is False
+    assert assumptions.sbc_pct_revenue[0] > Decimal("0")
+    assert dcf.sbc_valuation_impact_ev > Decimal("0")
     assert any("do not constitute investment advice" in n for n in dcf.notes)
 
     matrix = build_sensitivity_matrix(
@@ -279,3 +282,28 @@ def test_end_to_end_offline_sec_fixture_wacc_dcf_and_sensitivity(request, fixtur
     assert matrix.min_implied_value_per_share is not None
     assert matrix.max_implied_value_per_share is not None
     assert matrix.min_implied_value_per_share < matrix.max_implied_value_per_share
+
+
+def test_dcf_add_back_sbc_toggle_preserves_economic_baseline_and_reports_impact():
+    p1 = _make_period(2024, revenue=Decimal("900"), sbc=Decimal("27"))
+    p2 = _make_period(2025, revenue=Decimal("1000"), sbc=Decimal("30"))
+    report = _make_report([p1, p2])
+
+    suggested = suggest_dcf_assumptions(report, include_leases=False)
+    assert suggested.add_back_sbc is False
+    assert suggested.sbc_pct_revenue[0] == Decimal("0.03")
+
+    assump_econ = _flat_assumptions(sbc_pct_revenue=Decimal("0.03"), add_back_sbc=False)
+    assump_cfo = _flat_assumptions(sbc_pct_revenue=Decimal("0.03"), add_back_sbc=True)
+
+    res_econ = run_dcf_valuation(report, assump_econ, Decimal("0.10"))
+    res_cfo = run_dcf_valuation(report, assump_cfo, Decimal("0.10"))
+
+    # Economic baseline does NOT subtract SBC twice (GAAP EBIT already deducted it)
+    assert res_econ.projections[0].sbc == Decimal("33.00")
+    assert res_econ.projections[0].fcff == Decimal("166.0000")
+    # CFO add-back adds back 100% of SBC_1 = 33.00
+    assert res_cfo.projections[0].fcff == Decimal("199.0000")
+    assert res_cfo.bridge.enterprise_value - res_econ.bridge.enterprise_value == res_econ.sbc_valuation_impact_ev
+    assert res_econ.sbc_valuation_impact_ev == res_cfo.sbc_valuation_impact_ev > Decimal("0")
+    assert any("add_back_sbc=True" in n for n in res_cfo.notes)

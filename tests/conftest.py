@@ -140,3 +140,9 @@ def aapl_fixture() -> tuple[dict[str, Any], EntityFacts]:
 def msft_fixture() -> tuple[dict[str, Any], EntityFacts]:
     """Offline MSFT SEC companyfacts fixture."""
     return load_companyfacts_fixture("msft_companyfacts.json")
+
+
+@pytest.fixture(scope="session")
+def amzn_fixture() -> tuple[dict[str, Any], EntityFacts]:
+    """Offline AMZN SEC companyfacts fixture."""
+    return load_companyfacts_fixture("amzn_companyfacts.json")

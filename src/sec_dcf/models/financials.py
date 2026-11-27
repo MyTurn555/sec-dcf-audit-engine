@@ -88,9 +88,10 @@ class AnnualFinancialPeriod(BaseModel):
     equity_includes_nci: bool = False
     ending_shares: Decimal | None = None
 
-    # Cash Flow Statement (duration, USD)
+    # Cash Flow Statement / Non-Cash Compensation (duration, USD)
     cfo: Decimal
     capex: Decimal
+    sbc: Decimal = Decimal("0")
 
     # Full field-level lineage
     audit_trail: dict[str, LineItemAudit] = Field(default_factory=dict)
@@ -154,6 +155,12 @@ class AnnualFinancialPeriod(BaseModel):
     def fcf_simple(self) -> Decimal:
         """Simple Free Cash Flow: Operating Cash Flow minus normalized CapEx."""
         return self.cfo - self.capex
+
+    @computed_field
+    @property
+    def fcf_ex_sbc(self) -> Decimal:
+        """True Free Cash Flow excluding Stock-Based Compensation: CFO - CapEx - SBC."""
+        return self.cfo - self.capex - self.sbc
 
 
 class CompanyFinancialsReport(BaseModel):

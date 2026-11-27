@@ -23,11 +23,12 @@ from sec_dcf.qualitative.extractor import build_sections_from_texts
 from sec_dcf.qualitative.verifier import audit_qualitative_payload
 from sec_dcf.validation.accounting import validate_financials
 
-DEMO_TICKERS: tuple[str, ...] = ("AAPL", "MSFT")
+DEMO_TICKERS: tuple[str, ...] = ("AAPL", "MSFT", "AMZN")
 
 _DEMO_FIXTURE_FILES: dict[str, str] = {
     "AAPL": "aapl_companyfacts.json",
     "MSFT": "msft_companyfacts.json",
+    "AMZN": "amzn_companyfacts.json",
 }
 
 
@@ -44,6 +45,7 @@ class DemoMarketDefaults:
 DEMO_MARKET_DEFAULTS: dict[str, DemoMarketDefaults] = {
     "AAPL": DemoMarketDefaults(share_price=Decimal("225.00"), beta=Decimal("1.20")),
     "MSFT": DemoMarketDefaults(share_price=Decimal("425.00"), beta=Decimal("1.10")),
+    "AMZN": DemoMarketDefaults(share_price=Decimal("210.00"), beta=Decimal("1.15")),
 }
 
 

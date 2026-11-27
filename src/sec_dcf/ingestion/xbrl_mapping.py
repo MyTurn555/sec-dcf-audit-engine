@@ -110,6 +110,16 @@ DURATION_SPECS: tuple[ConceptSpec, ...] = (
         period_kind="duration",
         required=True,
     ),
+    ConceptSpec(
+        field_name="sbc",
+        concepts=(
+            "us-gaap:ShareBasedCompensation",
+            "us-gaap:AllocatedShareBasedCompensationExpense",
+        ),
+        period_kind="duration",
+        required=False,
+        default_if_absent=Decimal("0"),
+    ),
 )
 
 

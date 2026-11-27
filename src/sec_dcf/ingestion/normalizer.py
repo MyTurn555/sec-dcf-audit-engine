@@ -874,6 +874,7 @@ def normalize_entity_facts(
             ending_shares=values["ending_shares"],
             cfo=values["cfo"],  # type: ignore[arg-type]
             capex=normalized_capex,
+            sbc=values["sbc"] if values["sbc"] is not None else Decimal("0"),
             audit_trail=audits,
         )
         periods.append(period)

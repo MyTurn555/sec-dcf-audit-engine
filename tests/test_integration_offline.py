@@ -21,7 +21,10 @@ def block_network_sec_calls(monkeypatch):
     monkeypatch.setattr("sec_dcf.ingestion.edgar_client.Company", _forbid)
 
 
-@pytest.mark.parametrize("fixture_name,expected_ticker", [("aapl_fixture", "AAPL"), ("msft_fixture", "MSFT")])
+@pytest.mark.parametrize(
+    "fixture_name,expected_ticker",
+    [("aapl_fixture", "AAPL"), ("msft_fixture", "MSFT"), ("amzn_fixture", "AMZN")],
+)
 def test_five_year_10k_ingestion_and_validation_offline(request, fixture_name, expected_ticker):
     raw, facts = request.getfixturevalue(fixture_name)
 
@@ -44,17 +47,20 @@ def test_five_year_10k_ingestion_and_validation_offline(request, fixture_name, e
     assert len(set(fiscal_years)) == 5
 
     for period in validated.periods:
-        # All 9 core lines + DCF supporting metrics populated and positive where expected
+        # Core lines + SBC + DCF supporting metrics populated
         assert period.revenue > Decimal("0")
         assert period.ebit > Decimal("0")
         assert period.da > Decimal("0")
-        assert period.net_income > Decimal("0")
+        if not (expected_ticker == "AMZN" and period.fiscal_year == 2022):
+            assert period.net_income > Decimal("0")
         assert period.total_cash > Decimal("0")
         assert period.financial_debt >= Decimal("0")
         assert period.stockholders_equity > Decimal("0")
         assert period.cfo > Decimal("0")
         assert period.capex >= Decimal("0")
+        assert period.sbc > Decimal("0")
         assert period.fcf_simple == period.cfo - period.capex
+        assert period.fcf_ex_sbc == period.cfo - period.capex - period.sbc
         assert period.diluted_shares is not None and period.diluted_shares > Decimal("0")
         assert period.ending_shares is not None and period.ending_shares > Decimal("0")
         assert period.non_cash_nwc is not None
@@ -68,6 +74,7 @@ def test_five_year_10k_ingestion_and_validation_offline(request, fixture_name, e
             "revenue",
             "ebit",
             "da",
+            "sbc",
             "net_income",
             "cash_and_equivalents",
             "short_term_debt",

@@ -106,7 +106,7 @@ def export_companyfacts_fixture(client: EdgarClient, ticker: str, out_path: Path
 
 def main() -> None:
     client = EdgarClient()
-    for ticker in ("AAPL", "MSFT"):
+    for ticker in ("AAPL", "MSFT", "AMZN"):
         target = FIXTURES_DIR / f"{ticker.lower()}_companyfacts.json"
         export_companyfacts_fixture(client, ticker, target)
         print(f"Saved {ticker} fixture to {target}")

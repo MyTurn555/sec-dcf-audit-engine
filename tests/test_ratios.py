@@ -205,7 +205,7 @@ def test_empty_report_raises_domain_error():
         compute_historical_metrics(empty)
 
 
-@pytest.mark.parametrize("fixture_name", ["aapl_fixture", "msft_fixture"])
+@pytest.mark.parametrize("fixture_name", ["aapl_fixture", "msft_fixture", "amzn_fixture"])
 def test_historical_metrics_on_offline_sec_fixtures(request, fixture_name):
     raw, facts = request.getfixturevalue(fixture_name)
     report = normalize_entity_facts(
@@ -223,3 +223,22 @@ def test_historical_metrics_on_offline_sec_fixtures(request, fixture_name):
     assert latest.ebitda_margin is not None and latest.ebitda_margin > latest.ebit_margin
     assert latest.nopat > Decimal("0")
     assert latest.roic is not None and latest.roic > Decimal("0")
+    assert latest.sbc > Decimal("0")
+    assert latest.fcf_ex_sbc == latest.fcf_simple - latest.sbc
+    assert latest.sbc_to_revenue is not None and latest.sbc_to_revenue > Decimal("0")
+    assert latest.sbc_to_cfo is not None and latest.sbc_to_cfo > Decimal("0")
+
+
+def test_sbc_ratios_and_negative_cfo_edge_case():
+    p_ok = _make_period(2024, revenue=Decimal("1000"), cfo=Decimal("200"), capex=Decimal("50"), sbc=Decimal("40"))
+    p_neg_cfo = _make_period(2025, revenue=Decimal("1000"), cfo=Decimal("-20"), capex=Decimal("50"), sbc=Decimal("40"))
+    res = compute_historical_metrics(_make_report([p_ok, p_neg_cfo]))
+
+    m_ok, m_neg = res.periods
+    assert m_ok.fcf_ex_sbc == Decimal("110")
+    assert m_ok.sbc_to_revenue == Decimal("0.04")
+    assert m_ok.sbc_to_cfo == Decimal("0.2")
+
+    assert m_neg.fcf_ex_sbc == Decimal("-110")
+    assert m_neg.sbc_to_revenue == Decimal("0.04")
+    assert m_neg.sbc_to_cfo is None

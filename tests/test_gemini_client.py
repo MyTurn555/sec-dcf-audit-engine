@@ -100,6 +100,7 @@ def test_analyze_sections_uses_structured_output_and_parses_response():
     assert cfg.response_schema is QualitativeExtractionPayload
     assert cfg.temperature == 0.0
     assert "NEVER perform financial calculations" in cfg.system_instruction
+    assert "leases not yet commenced" in cfg.system_instruction
 
 
 def test_analyze_sections_falls_back_to_response_text_json():

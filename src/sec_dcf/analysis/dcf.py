@@ -76,6 +76,7 @@ def suggest_dcf_assumptions(
     nwc_pcts = [
         p.non_cash_nwc_to_revenue for p in periods if p.non_cash_nwc_to_revenue is not None
     ]
+    sbc_pcts = [p.sbc_to_revenue for p in periods if p.sbc_to_revenue is not None]
 
     suggested_growth = _clamp(
         _decimal_median(rev_growths, Decimal("0.05")),
@@ -95,6 +96,7 @@ def suggest_dcf_assumptions(
     suggested_da = max(ZERO, _decimal_median(da_pcts, Decimal("0.04")))
     suggested_capex = max(ZERO, _decimal_median(capex_pcts, Decimal("0.05")))
     suggested_nwc = _decimal_median(nwc_pcts, Decimal("0.00"))
+    suggested_sbc = max(ZERO, _decimal_median(sbc_pcts, Decimal("0.00")))
 
     return DcfAssumptions(
         revenue_growth=suggested_growth,
@@ -103,6 +105,8 @@ def suggest_dcf_assumptions(
         da_pct_revenue=suggested_da,
         capex_pct_revenue=suggested_capex,
         nwc_pct_revenue=suggested_nwc,
+        sbc_pct_revenue=suggested_sbc,
+        add_back_sbc=False,
         terminal_growth_rate=terminal_growth_rate,
         discounting_convention=discounting_convention,
         include_leases=include_leases,
@@ -196,48 +200,23 @@ def _build_bridge(
     )
 
 
-def run_dcf_valuation(
-    report: CompanyFinancialsReport,
+def _evaluate_dcf_core(
+    *,
+    latest: AnnualFinancialPeriod,
     assumptions: DcfAssumptions,
-    wacc: Decimal | WaccResult,
-) -> DcfValuationResult:
-    """
-    Execute a deterministic 5-year FCFF/DCF valuation from normalized 10-K financials.
-
-    Raises DcfValuationError when WACC <= terminal_growth_rate, when include_leases
-    differs between WaccResult and DcfAssumptions, or when shares/periods are missing.
-    """
-    if not report.periods:
-        raise DcfValuationError(
-            f"{report.ticker}: cannot run DCF valuation without annual periods."
-        )
-
-    wacc_value = _resolve_wacc_decimal(wacc, assumptions)
-    if wacc_value <= ZERO:
-        raise DcfValuationError(f"WACC must be positive, got {wacc_value}.")
-    if wacc_value <= assumptions.terminal_growth_rate:
-        raise DcfValuationError(
-            f"Gordon Growth requires WACC ({wacc_value}) > terminal_growth_rate "
-            f"({assumptions.terminal_growth_rate})."
-        )
-
-    sorted_periods = sorted(report.periods, key=lambda p: p.period_end)
-    latest = sorted_periods[-1]
-    shares_used, shares_source = _resolve_shares(latest, assumptions)
-    initial_nwc, initial_nwc_source = _resolve_initial_nwc(latest, assumptions)
-
-    notes: list[str] = [EDUCATIONAL_DISCLAIMER]
-    if assumptions.include_leases:
-        notes.append(
-            "include_leases=True: EV -> Equity Value bridge deducts total_debt_incl_leases "
-            "(ASC 842 lease liabilities included consistently with WACC)."
-        )
-    if initial_nwc_source == "model_pct_fallback":
-        notes.append(
-            f"FY{latest.fiscal_year}: balance-sheet non_cash_nwc unavailable; "
-            "initial NWC_0 derived from year-1 nwc_pct_revenue * base_revenue."
-        )
-
+    wacc_value: Decimal,
+    initial_nwc: Decimal,
+    shares_used: Decimal,
+    shares_source: SharesSource,
+) -> tuple[
+    list[ProjectedYearCashFlow],
+    Decimal,
+    TerminalValueSummary,
+    EnterpriseToEquityBridge,
+    list[str],
+]:
+    """Compute core 5Y projections, Terminal Value, and EV->Equity bridge."""
+    notes: list[str] = []
     projections: list[ProjectedYearCashFlow] = []
     prev_revenue = latest.revenue
     prev_nwc = initial_nwc
@@ -251,6 +230,7 @@ def run_dcf_valuation(
         margin_t = assumptions.ebit_margin[idx]
         tax_t = assumptions.tax_rate[idx]
         da_pct_t = assumptions.da_pct_revenue[idx]
+        sbc_pct_t = assumptions.sbc_pct_revenue[idx]
         capex_pct_t = assumptions.capex_pct_revenue[idx]
         nwc_pct_t = assumptions.nwc_pct_revenue[idx]
 
@@ -258,10 +238,12 @@ def run_dcf_valuation(
         ebit_t = revenue_t * margin_t
         nopat_t = ebit_t * (ONE - tax_t)
         da_t = revenue_t * da_pct_t
+        sbc_t = revenue_t * sbc_pct_t
         capex_t = revenue_t * capex_pct_t
         nwc_t = revenue_t * nwc_pct_t
         delta_nwc_t = nwc_t - prev_nwc
-        fcff_t = nopat_t + da_t - capex_t - delta_nwc_t
+        sbc_addback_t = sbc_t if assumptions.add_back_sbc else ZERO
+        fcff_t = nopat_t + da_t + sbc_addback_t - capex_t - delta_nwc_t
         ebitda_t = ebit_t + da_t
 
         discount_period = (
@@ -282,6 +264,7 @@ def run_dcf_valuation(
                 tax_rate=tax_t,
                 nopat=nopat_t,
                 da=da_t,
+                sbc=sbc_t,
                 capex=capex_t,
                 nwc=nwc_t,
                 delta_nwc=delta_nwc_t,
@@ -356,6 +339,93 @@ def run_dcf_valuation(
             "limited-liability equity value and value per share are floored at 0."
         )
 
+    return projections, pv_projected_fcff, tv_summary, bridge, notes
+
+
+def run_dcf_valuation(
+    report: CompanyFinancialsReport,
+    assumptions: DcfAssumptions,
+    wacc: Decimal | WaccResult,
+) -> DcfValuationResult:
+    """
+    Execute a deterministic 5-year FCFF/DCF valuation from normalized 10-K financials.
+
+    Raises DcfValuationError when WACC <= terminal_growth_rate, when include_leases
+    differs between WaccResult and DcfAssumptions, or when shares/periods are missing.
+    """
+    if not report.periods:
+        raise DcfValuationError(
+            f"{report.ticker}: cannot run DCF valuation without annual periods."
+        )
+
+    wacc_value = _resolve_wacc_decimal(wacc, assumptions)
+    if wacc_value <= ZERO:
+        raise DcfValuationError(f"WACC must be positive, got {wacc_value}.")
+    if wacc_value <= assumptions.terminal_growth_rate:
+        raise DcfValuationError(
+            f"Gordon Growth requires WACC ({wacc_value}) > terminal_growth_rate "
+            f"({assumptions.terminal_growth_rate})."
+        )
+
+    sorted_periods = sorted(report.periods, key=lambda p: p.period_end)
+    latest = sorted_periods[-1]
+    shares_used, shares_source = _resolve_shares(latest, assumptions)
+    initial_nwc, initial_nwc_source = _resolve_initial_nwc(latest, assumptions)
+
+    notes: list[str] = [EDUCATIONAL_DISCLAIMER]
+    if assumptions.include_leases:
+        notes.append(
+            "include_leases=True: EV -> Equity Value bridge deducts total_debt_incl_leases "
+            "(ASC 842 lease liabilities included consistently with WACC)."
+        )
+    if assumptions.add_back_sbc:
+        notes.append(
+            "add_back_sbc=True: GAAP EBIT already deducts SBC, so adding SBC back to FCFF "
+            "mirrors accounting CFO rather than treating SBC as a real economic expense."
+        )
+    if initial_nwc_source == "model_pct_fallback":
+        notes.append(
+            f"FY{latest.fiscal_year}: balance-sheet non_cash_nwc unavailable; "
+            "initial NWC_0 derived from year-1 nwc_pct_revenue * base_revenue."
+        )
+
+    projections, pv_projected_fcff, tv_summary, bridge, core_notes = _evaluate_dcf_core(
+        latest=latest,
+        assumptions=assumptions,
+        wacc_value=wacc_value,
+        initial_nwc=initial_nwc,
+        shares_used=shares_used,
+        shares_source=shares_source,
+    )
+    notes.extend(core_notes)
+
+    sbc_impact_ev = ZERO
+    sbc_impact_per_share = ZERO
+    if any(val > ZERO for val in assumptions.sbc_pct_revenue):
+        alt_assumptions = assumptions.model_copy(
+            update={"add_back_sbc": not assumptions.add_back_sbc}
+        )
+        _, _, _, alt_bridge, _ = _evaluate_dcf_core(
+            latest=latest,
+            assumptions=alt_assumptions,
+            wacc_value=wacc_value,
+            initial_nwc=initial_nwc,
+            shares_used=shares_used,
+            shares_source=shares_source,
+        )
+        if assumptions.add_back_sbc:
+            ev_addback = bridge.enterprise_value
+            ps_addback = bridge.implied_value_per_share
+            ev_econ = alt_bridge.enterprise_value
+            ps_econ = alt_bridge.implied_value_per_share
+        else:
+            ev_addback = alt_bridge.enterprise_value
+            ps_addback = alt_bridge.implied_value_per_share
+            ev_econ = bridge.enterprise_value
+            ps_econ = bridge.implied_value_per_share
+        sbc_impact_ev = ev_addback - ev_econ
+        sbc_impact_per_share = ps_addback - ps_econ
+
     return DcfValuationResult(
         ticker=report.ticker,
         base_fiscal_year=latest.fiscal_year,
@@ -364,11 +434,14 @@ def run_dcf_valuation(
         initial_nwc_source=initial_nwc_source,
         wacc=wacc_value,
         include_leases=assumptions.include_leases,
+        add_back_sbc=assumptions.add_back_sbc,
         discounting_convention=assumptions.discounting_convention,
         projections=projections,
         pv_projected_fcff=pv_projected_fcff,
         terminal_value=tv_summary,
         bridge=bridge,
+        sbc_valuation_impact_ev=sbc_impact_ev,
+        sbc_valuation_impact_per_share=sbc_impact_per_share,
         notes=notes,
     )
 

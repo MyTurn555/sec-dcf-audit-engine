@@ -25,6 +25,8 @@ from sec_dcf import (
     build_sensitivity_matrix,
     calculate_wacc,
     compute_historical_metrics,
+    compute_market_multiples,
+    export_dcf_workbook_bytes,
     fetch_company_financials,
     run_dcf_valuation,
     suggest_dcf_assumptions,
@@ -42,6 +44,7 @@ from sec_dcf.ui import (
     build_dcf_projections_dataframe,
     build_ev_bridge_rows,
     build_historical_metrics_dataframe,
+    build_multiples_comparison_dataframe,
     build_sensitivity_dataframe,
     build_sensitivity_grid_params,
     build_validation_summary,
@@ -176,6 +179,8 @@ def _apply_dcf_assumptions_to_state(assumptions: DcfAssumptions, base_fy: int) -
     st.session_state["dcf_da_pct"] = float(assumptions.da_pct_revenue[0] * PERCENT_SCALE)
     st.session_state["dcf_capex_pct"] = float(assumptions.capex_pct_revenue[0] * PERCENT_SCALE)
     st.session_state["dcf_nwc_pct"] = float(assumptions.nwc_pct_revenue[0] * PERCENT_SCALE)
+    st.session_state["dcf_sbc_pct"] = float(assumptions.sbc_pct_revenue[0] * PERCENT_SCALE)
+    st.session_state["dcf_add_back_sbc"] = assumptions.add_back_sbc
     st.session_state["dcf_5y_df"] = assumptions_to_5y_dataframe(assumptions, base_fy)
     st.session_state.pop("dcf_5y_editor_widget", None)
 
@@ -193,6 +198,8 @@ def _scalar_state_to_assumptions(
         da_pct_revenue=_dec_from_pct(st.session_state["dcf_da_pct"]),
         capex_pct_revenue=_dec_from_pct(st.session_state["dcf_capex_pct"]),
         nwc_pct_revenue=_dec_from_pct(st.session_state["dcf_nwc_pct"]),
+        sbc_pct_revenue=_dec_from_pct(st.session_state["dcf_sbc_pct"]),
+        add_back_sbc=bool(st.session_state["dcf_add_back_sbc"]),
         terminal_growth_rate=_dec_from_pct(st.session_state["dcf_terminal_g_pct"]),
         discounting_convention=st.session_state["dcf_discount_conv"],
         include_leases=include_leases,
@@ -334,7 +341,9 @@ def _render_tab_financials(report: Any, include_leases: bool) -> None:
             "EBIT ($ mld)": st.column_config.NumberColumn(format="%.2f"),
             "EBITDA ($ mld)": st.column_config.NumberColumn(format="%.2f"),
             "Zysk netto ($ mld)": st.column_config.NumberColumn(format="%.2f"),
+            "SBC ($ mld)": st.column_config.NumberColumn(format="%.2f"),
             "Simple FCF ($ mld)": st.column_config.NumberColumn(format="%.2f"),
+            "True FCF ex-SBC ($ mld)": st.column_config.NumberColumn(format="%.2f"),
             "Marża EBIT (%)": st.column_config.NumberColumn(format="%.1f%%"),
             "Marża EBITDA (%)": st.column_config.NumberColumn(format="%.1f%%"),
             "Stopa podatkowa NOPAT (%)": st.column_config.NumberColumn(format="%.1f%%"),
@@ -342,6 +351,8 @@ def _render_tab_financials(report: Any, include_leases: bool) -> None:
             "Konwersja gotówki (%)": st.column_config.NumberColumn(format="%.1f%%"),
             "CapEx / Przychody (%)": st.column_config.NumberColumn(format="%.1f%%"),
             "D&A / Przychody (%)": st.column_config.NumberColumn(format="%.1f%%"),
+            "SBC / Przychody (%)": st.column_config.NumberColumn(format="%.1f%%"),
+            "SBC / CFO (%)": st.column_config.NumberColumn(format="%.1f%%"),
             "Net Debt ($ mld)": st.column_config.NumberColumn(format="%.2f"),
             "Net Debt / EBITDA": st.column_config.NumberColumn(format="%.2fx"),
         },
@@ -350,6 +361,7 @@ def _render_tab_financials(report: Any, include_leases: bool) -> None:
     with st.expander("Definicje finansowe zastosowane w Module 2"):
         st.markdown(
             "- **Simple FCF**: `CFO - CapEx` (przepływy operacyjne minus nakłady inwestycyjne).\n"
+            "- **True FCF (ex-SBC)**: `CFO - CapEx - SBC` (koryguje księgowe CFO o niepieniężny koszt wynagrodzeń w akcjach `Stock-Based Compensation`).\n"
             "- **Non-cash NWC**: `(Aktywa obrotowe - Gotówka i kr. inwestycje) - (Zobowiązania kr. - Dług kr. - Krótkoterminowe leasingi)`.\n"
             "- **ROIC**: `NOPAT / Średni Invested Capital` (z lub bez leasingów ASC 842 zależnie od przełącznika w pasku bocznym)."
         )
@@ -459,12 +471,14 @@ def _render_tab_valuation(mode: str, report: Any, include_leases: bool) -> None:
     if st.session_state["wacc_tax_override_on"]:
         wacc_kwargs["tax_rate"] = _dec_from_pct(st.session_state["wacc_tax_override_pct"])
 
+    wacc_inputs_obj: WaccInputs | None = None
     wacc_result = None
     if rf_decimal is None:
         st.warning("Brak stopy Rf (np. błąd FRED API) — przełącz na ręczną stopę Rf lub uzupełnij klucz FRED_API_KEY.")
     else:
         try:
-            wacc_result = calculate_wacc(report, WaccInputs(**wacc_kwargs))
+            wacc_inputs_obj = WaccInputs(**wacc_kwargs)
+            wacc_result = calculate_wacc(report, wacc_inputs_obj)
         except (WaccCalculationError, ValueError) as exc:
             st.error(f"Błąd kalkulacji WACC: {exc}")
 
@@ -501,11 +515,23 @@ def _render_tab_valuation(mode: str, report: Any, include_leases: bool) -> None:
             if exit_on:
                 st.number_input("Mnożnik wyjścia EV/EBITDA", min_value=1.0, max_value=60.0, step=0.5, format="%.1f", key="dcf_exit_mult")
 
-        edit_5y_mode = st.toggle(
-            "Zaawansowana edycja rok po roku (5Y)",
-            value=False,
-            key="dcf_edit_mode_5y",
-        )
+        t_5y, t_sbc = st.columns(2)
+        with t_5y:
+            edit_5y_mode = st.toggle(
+                "Zaawansowana edycja rok po roku (5Y)",
+                value=False,
+                key="dcf_edit_mode_5y",
+            )
+        with t_sbc:
+            add_back_sbc = st.toggle(
+                "Dodaj SBC z powrotem do FCFF (wariant księgowego CFO)",
+                value=bool(st.session_state.get("dcf_add_back_sbc", False)),
+                key="dcf_add_back_sbc",
+                help=(
+                    "GAAP EBIT już zawiera koszt SBC. Domyślnie (OFF) SBC jest traktowane jako realny koszt "
+                    "ekonomiczny. Włączenie (ON) dodaje SBC z powrotem do FCFF, aby porównać model z konwencją CFO."
+                ),
+            )
 
         exit_mult_dec = (
             _dec_from_float(st.session_state["dcf_exit_mult"])
@@ -521,6 +547,7 @@ def _render_tab_valuation(mode: str, report: Any, include_leases: bool) -> None:
             with s1:
                 st.number_input("Wzrost przychodów (%)", min_value=-50.0, max_value=100.0, step=0.5, format="%.2f", key="dcf_rev_growth_pct")
                 st.number_input("D&A / Przychody (%)", min_value=0.0, max_value=40.0, step=0.25, format="%.2f", key="dcf_da_pct")
+                st.number_input("SBC / Przychody (%)", min_value=0.0, max_value=40.0, step=0.25, format="%.2f", key="dcf_sbc_pct")
             with s2:
                 st.number_input("Marża EBIT (%)", min_value=-50.0, max_value=80.0, step=0.5, format="%.2f", key="dcf_ebit_margin_pct")
                 st.number_input("CapEx / Przychody (%)", min_value=0.0, max_value=50.0, step=0.25, format="%.2f", key="dcf_capex_pct")
@@ -559,6 +586,7 @@ def _render_tab_valuation(mode: str, report: Any, include_leases: bool) -> None:
                     terminal_growth_rate=_dec_from_pct(st.session_state["dcf_terminal_g_pct"]),
                     discounting_convention=st.session_state["dcf_discount_conv"],
                     include_leases=include_leases,
+                    add_back_sbc=add_back_sbc,
                     exit_ebitda_multiple=exit_mult_dec,
                 )
             except DcfValuationError as exc:
@@ -615,6 +643,62 @@ def _render_tab_valuation(mode: str, report: Any, include_leases: bool) -> None:
     st.caption(
         "Powyższa implikowana wartość wynika wyłącznie z założeń wprowadzonych przez użytkownika "
         "i ma charakter edukacyjno-badawczy (brak rekomendacji Kup/Sprzedaj oraz ceny docelowej)."
+    )
+
+    if dcf_result.sbc_valuation_impact_ev != Decimal("0"):
+        sbc_mode_label = (
+            "Wariant CFO (add_back_sbc=True)"
+            if dcf_result.add_back_sbc
+            else "Wariant ekonomiczny (add_back_sbc=False — GAAP EBIT uwzględnia koszt SBC)"
+        )
+        st.info(
+            f"**Wpływ traktowania SBC ({sbc_mode_label}):** "
+            f"dodanie SBC do FCFF podnosi wycenę o **+${dcf_result.sbc_valuation_impact_ev / BILLION:,.2f} mld EV** "
+            f"(**+${dcf_result.sbc_valuation_impact_per_share:,.2f} / akcję**)."
+        )
+
+    assert wacc_inputs_obj is not None
+    metrics_for_export = compute_historical_metrics(report, include_leases=include_leases)
+    multiples_cmp = compute_market_multiples(
+        report,
+        include_leases=include_leases,
+        share_price=wacc_inputs_obj.share_price,
+        market_cap_override=wacc_inputs_obj.market_cap_override,
+        dcf_result=dcf_result,
+    )
+
+    c_mult_hdr, c_xl_btn = st.columns([2.2, 1])
+    with c_mult_hdr:
+        st.markdown(f"#### Konfrontacja z bieżącymi mnożnikami rynkowymi (FY{multiples_cmp.fiscal_year} vs DCF)")
+    with c_xl_btn:
+        xlsx_bytes = export_dcf_workbook_bytes(
+            report=report,
+            metrics_report=metrics_for_export,
+            wacc_inputs=wacc_inputs_obj,
+            wacc_result=wacc_result,
+            assumptions=assumptions,
+            dcf_result=dcf_result,
+            sensitivity=sensitivity,
+            multiples=multiples_cmp,
+        )
+        st.download_button(
+            label="Eksportuj model do Excela (.xlsx)",
+            data=xlsx_bytes,
+            file_name=f"{report.ticker}_DCF_Audit_FY{base_fy}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            width="stretch",
+            key="download_dcf_excel",
+        )
+
+    if multiples_cmp.current_market_cap is None:
+        st.caption(
+            "Aktywny tryb kapitału księgowego (`book_equity_fallback`) bez ceny akcji / Market Cap — "
+            "wyświetlane są wyłącznie mnożniki implikowane z wyceny DCF."
+        )
+    st.dataframe(
+        build_multiples_comparison_dataframe(multiples_cmp),
+        width="stretch",
+        hide_index=True,
     )
 
     if dcf_result.bridge.equity_floored_at_zero:

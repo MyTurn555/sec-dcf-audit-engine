@@ -34,6 +34,7 @@ from sec_dcf.ui import (
     build_dcf_projections_dataframe,
     build_ev_bridge_rows,
     build_historical_metrics_dataframe,
+    build_multiples_comparison_dataframe,
     build_sensitivity_dataframe,
     build_sensitivity_grid_params,
     build_validation_summary,
@@ -112,6 +113,8 @@ def test_presenters_and_5y_dataframe_roundtrip_exact_decimal():
     metrics_df = build_historical_metrics_dataframe(metrics)
     assert len(metrics_df) == 5
     assert "ROIC (%)" in metrics_df.columns
+    assert "True FCF ex-SBC ($ mld)" in metrics_df.columns
+    assert "SBC / Przychody (%)" in metrics_df.columns
 
     base_assumptions = suggest_dcf_assumptions(report, include_leases=True)
     df_5y = assumptions_to_5y_dataframe(base_assumptions, latest_fy)
@@ -193,6 +196,18 @@ def test_charts_and_resilience_when_all_sensitivity_cells_invalid_or_equity_floo
     assert len(build_dcf_projections_dataframe(dcf_res)) == 5
     assert len(build_ev_bridge_rows(dcf_res)) == 7
     assert build_sensitivity_dataframe(matrix).shape == (len(wacc_grid), len(g_grid))
+
+    from sec_dcf import compute_market_multiples
+
+    multiples = compute_market_multiples(
+        report,
+        include_leases=True,
+        share_price=demo_cfg.share_price,
+        dcf_result=dcf_res,
+    )
+    mult_df = build_multiples_comparison_dataframe(multiples)
+    assert len(mult_df) == 6
+    assert "True FCF Yield (ex-SBC)" in set(mult_df["Mnożnik / Stopa zwrotu"])
 
     # Edge case 1: all sensitivity cells invalid (WACC <= g everywhere)
     invalid_matrix = build_sensitivity_matrix(
